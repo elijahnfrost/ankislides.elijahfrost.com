@@ -20,6 +20,7 @@
       --success: #3ecf8e;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html, body {
       margin: 0;
       padding: 0;
@@ -76,6 +77,7 @@
       margin-bottom: 10px;
     }
     .drop {
+      display: block;
       border: 1.5px dashed var(--border);
       border-radius: 12px;
       padding: 28px;
@@ -90,10 +92,12 @@
     }
     .drop strong { color: var(--text); }
     .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
-    .drop input[type="file"] { display: none; }
+    .sr-only-input { display: none !important; }
+    .drop:focus-within { outline: none; }
+    label.section, label.drop { outline: none; }
 
     .file-info {
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
@@ -104,6 +108,7 @@
       background: rgba(255, 255, 255, 0.02);
       font-size: 14px;
     }
+    .file-info.visible { display: flex; }
     .file-info .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .file-info .meta { color: var(--muted); font-size: 12px; }
     .file-info button {
@@ -315,18 +320,18 @@
     <div class="layout">
     <form id="form" class="card" autocomplete="off">
       <label class="section" for="file-input">1. Upload your export</label>
+      <input id="file-input" class="sr-only-input" type="file" accept=".txt,.zip,.apkg,.colpkg,text/plain,application/zip,application/octet-stream" />
       <label id="drop" class="drop" for="file-input">
         <div><strong>Click to choose</strong> or drag a file here</div>
         <div class="hint">
           <code>.apkg</code> · <code>.colpkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB
         </div>
-        <input id="file-input" type="file" accept=".txt,.zip,.apkg,.colpkg,text/plain,application/zip,application/octet-stream" />
       </label>
 
-      <div id="file-info" class="file-info" hidden>
+      <div id="file-info" class="file-info">
         <div>
-          <div class="name" id="file-name">—</div>
-          <div class="meta" id="file-meta">—</div>
+          <div class="name" id="file-name"></div>
+          <div class="meta" id="file-meta"></div>
         </div>
         <button type="button" id="file-clear" aria-label="Remove file">remove</button>
       </div>
@@ -493,14 +498,19 @@
     function setFile(file) {
       if (!file) {
         currentFile = null;
-        fileInfo.hidden = true;
+        fileName.textContent = "";
+        fileMeta.textContent = "";
+        fileInfo.classList.remove("visible");
         submit.disabled = true;
         return;
       }
       currentFile = file;
       fileName.textContent = file.name;
-      fileMeta.textContent = formatBytes(file.size) + " · " + (file.type || "text/plain");
-      fileInfo.hidden = false;
+      const niceType = file.type && file.type !== "application/octet-stream"
+        ? file.type
+        : (file.name.match(/\.[^.]+$/) || ["file"])[0].replace(".", "").toLowerCase();
+      fileMeta.textContent = formatBytes(file.size) + " · " + niceType;
+      fileInfo.classList.add("visible");
       submit.disabled = false;
       setStatus("");
     }
