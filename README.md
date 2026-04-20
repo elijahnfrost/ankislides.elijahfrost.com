@@ -18,14 +18,46 @@ The web app lives in:
 
 Uploads are capped at 10 MB, never written to disk, and the function's working directory is read-only anyway.
 
-### How to export from Anki
+### Which Anki export to use
 
-1. In Anki desktop: **File → Export…**
+| Anki export option | Supported? | Notes |
+| --- | --- | --- |
+| **Notes in Plain Text (.txt)** | Yes — use this | Tab-separated front/back. `<img>` references are kept when "Include HTML" is on. |
+| Cards in Plain Text (.txt) | Works | Same tab-separated shape, one row per card rather than per note. |
+| Anki Deck Package (.apkg) | No | Binary SQLite bundle. Convert to Notes in Plain Text first. |
+| Anki Collection Package (.colpkg) | No | Full profile backup; same binary format. |
+| PDF / HTML exporter (add-on) | No | Those are output formats, not inputs. |
+
+### Export steps (with images)
+
+1. In Anki: **File → Export…**
 2. Export format: **Notes in Plain Text (.txt)**
-3. Pick a deck and save the file.
-4. Upload that `.txt` to the web app and pick PDF, PowerPoint, or PNG.
+3. Check **Include HTML and media references** (required for images to survive the export).
+4. Leave "Include tags" and "Include deck name" off — they just clutter the slides.
+5. Save the `.txt`.
+6. Locate your media folder:
+   - macOS: `~/Library/Application Support/Anki2/<profile>/collection.media`
+   - Windows: `%APPDATA%\Anki2\<profile>\collection.media`
+   - Linux: `~/.local/share/Anki2/<profile>/collection.media`
+   - Or use `Tools → Check Media…` in Anki to see the path.
+7. Select the `.txt` **and** the `collection.media` folder, right-click → **Compress** (macOS) or **Send to → Compressed folder** (Windows). Drop the resulting `.zip` on the page.
 
-> Image references (`<img src="...">`) are skipped on the web because the media folder isn't uploaded. For decks with embedded images, use the CLI locally — see below.
+For a text-only deck, upload the `.txt` directly — no zip needed.
+
+Uploads are capped at 50 MB. The server extracts into a per-request temp dir and deletes it before the response returns.
+
+### What makes it into the slide vs. what gets dropped
+
+| Content | Result |
+| --- | --- |
+| Card front / back text | One slide each (front1, back1, front2, back2, …) |
+| Line breaks (`<br>`, newlines) | Preserved |
+| Images (`<img src>`) | Embedded if you upload the zip with media; dropped otherwise |
+| Bold / italic / color / fonts | Stripped — slides use a single typeface |
+| MathJax / LaTeX (`\[ … \]`) | Kept as raw source, not rendered |
+| Audio / video (`[sound:…]`) | Silently dropped |
+| Cloze deletions (`{{c1::…}}`) | Shown as raw text — export with "Include HTML" to get the rendered HTML |
+| Tags, deck name, scheduling data | Not included |
 
 ### Running locally (web)
 

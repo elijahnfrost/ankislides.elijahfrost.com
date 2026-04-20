@@ -168,18 +168,53 @@
     footer a:hover { text-decoration: underline; }
 
     details.help {
-      margin-top: 18px;
+      margin-top: 14px;
       color: var(--muted);
       font-size: 13px;
       line-height: 1.55;
     }
-    details.help summary { cursor: pointer; color: var(--text); font-weight: 500; }
-    details.help ol { padding-left: 18px; }
+    details.help + details.help { margin-top: 10px; }
+    details.help summary {
+      cursor: pointer;
+      color: var(--text);
+      font-weight: 500;
+      padding: 8px 0;
+      list-style-position: outside;
+    }
+    details.help[open] summary { margin-bottom: 6px; }
+    details.help ol, details.help ul { padding-left: 20px; margin: 4px 0 8px; }
+    details.help li { margin-bottom: 4px; }
     details.help code {
       background: rgba(255, 255, 255, 0.06);
       padding: 1px 6px;
       border-radius: 4px;
       font-size: 12px;
+    }
+    details.help strong { color: var(--text); }
+    table.compat {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 6px 0 10px;
+      font-size: 12.5px;
+    }
+    table.compat th, table.compat td {
+      border-bottom: 1px solid var(--border);
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    table.compat th { color: var(--text); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+    table.compat td.good { color: var(--success); }
+    table.compat td.bad { color: var(--danger); }
+    kbd {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
     .spinner {
@@ -207,8 +242,9 @@
       <label id="drop" class="drop" for="file-input">
         <div><strong>Click to choose</strong> or drag a file here</div>
         <div class="hint">
-          <code>.txt</code> for text-only, or <code>.zip</code> containing the
-          <code>.txt</code> + your images · max 50 MB
+          Anki <code>Notes in Plain Text (.txt)</code>, or a <code>.zip</code>
+          containing that <code>.txt</code> + your <code>collection.media</code>
+          folder for images · max 50 MB
         </div>
         <input id="file-input" type="file" accept=".txt,.zip,text/plain,application/zip" />
       </label>
@@ -244,20 +280,87 @@
       <div id="status" class="status" role="status" aria-live="polite"></div>
 
       <details class="help">
-        <summary>How do I export from Anki (with images)?</summary>
+        <summary>Which Anki export should I use?</summary>
+        <p>Only one of Anki's export options is supported. Pick <strong>Notes in Plain Text (.txt)</strong>.</p>
+        <table class="compat">
+          <thead>
+            <tr><th>Anki export option</th><th>Supported?</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Notes in Plain Text (.txt)</strong></td>
+              <td class="good">Yes — use this</td>
+              <td>Tab-separated front/back; image references (<code>&lt;img src&gt;</code>) survive when “Include HTML” is on.</td>
+            </tr>
+            <tr>
+              <td>Cards in Plain Text (.txt)</td>
+              <td class="good">Works</td>
+              <td>Same tab-separated shape, one row per card instead of per note.</td>
+            </tr>
+            <tr>
+              <td>Anki Deck Package (.apkg)</td>
+              <td class="bad">No</td>
+              <td>Binary SQLite bundle. Not parsed — convert to Notes in Plain Text first.</td>
+            </tr>
+            <tr>
+              <td>Anki Collection Package (.colpkg)</td>
+              <td class="bad">No</td>
+              <td>Full profile backup; same binary format as <code>.apkg</code>.</td>
+            </tr>
+            <tr>
+              <td>PDF / HTML exporter (add-on)</td>
+              <td class="bad">No</td>
+              <td>Those are output formats, not inputs.</td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
+
+      <details class="help">
+        <summary>Exact export steps (with images)</summary>
         <ol>
-          <li>In Anki desktop: <code>File → Export…</code> → <strong>Notes in Plain Text (.txt)</strong>, pick a deck, save.</li>
+          <li>In Anki desktop: <kbd>File</kbd> → <kbd>Export…</kbd></li>
+          <li><strong>Export format:</strong> Notes in Plain Text (.txt)</li>
+          <li><strong>Include:</strong> pick one deck, or leave <em>All Decks</em>.</li>
           <li>
-            Find your Anki media folder (macOS:
-            <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code>).
+            Check <strong>Include HTML and media references</strong>.
+            <br/><span style="font-size:12px">Without it, Anki strips the <code>&lt;img&gt;</code> tags and your images can't be matched — you'll get a text-only deck even if you zip media.</span>
+          </li>
+          <li>Leave “Include tags” and “Include deck name” off (they'd clutter the slides).</li>
+          <li>Save the <code>.txt</code>.</li>
+          <li>
+            Find your media folder:
+            <ul>
+              <li><strong>macOS:</strong> <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code></li>
+              <li><strong>Windows:</strong> <code>%APPDATA%\Anki2\&lt;profile&gt;\collection.media</code></li>
+              <li><strong>Linux:</strong> <code>~/.local/share/Anki2/&lt;profile&gt;/collection.media</code></li>
+            </ul>
+            Or from Anki: <kbd>Tools</kbd> → <kbd>Check Media…</kbd> shows the path.
           </li>
           <li>
-            Put the <code>.txt</code> and the media folder next to each other and zip them
-            (Finder → right-click → <em>Compress</em>). Nested folders inside the zip are
-            fine — images are matched by filename.
+            Select the <code>.txt</code> <em>and</em> the <code>collection.media</code> folder in your
+            file manager, right-click → <strong>Compress</strong> (macOS) or <strong>Send to → Compressed folder</strong>
+            (Windows). Drop the resulting <code>.zip</code> onto the upload box.
           </li>
-          <li>Upload the <code>.zip</code> here. For a text-only deck, just upload the <code>.txt</code>.</li>
         </ol>
+        <p style="font-size:12px">Nested folders inside the zip are fine. Images are matched by filename, so <code>collection.media/abc.png</code> and <code>abc.png</code> both resolve.</p>
+      </details>
+
+      <details class="help">
+        <summary>What makes it into the slide vs. what gets dropped</summary>
+        <table class="compat">
+          <thead><tr><th>Content</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Card front / back text</td><td class="good">One slide each (front1, back1, front2, back2, …)</td></tr>
+            <tr><td>Line breaks (<code>&lt;br&gt;</code>, newlines)</td><td class="good">Preserved</td></tr>
+            <tr><td>Images (<code>&lt;img src&gt;</code>)</td><td class="good">Embedded — but only if you upload the <code>.zip</code> with media</td></tr>
+            <tr><td>Bold / italic / color / fonts</td><td class="bad">Stripped — slides use a single clean typeface</td></tr>
+            <tr><td>MathJax / LaTeX (<code>\[ … \]</code>)</td><td class="bad">Kept as raw source, not rendered</td></tr>
+            <tr><td>Audio / video ([sound:…] tags)</td><td class="bad">Silently dropped — slide decks can't play them</td></tr>
+            <tr><td>Cloze deletions ({{c1::…}})</td><td class="bad">Shown as raw text; export with “Include HTML” to see the card's actual rendered HTML.</td></tr>
+            <tr><td>Tags, deck name, scheduling data</td><td class="bad">Not included</td></tr>
+          </tbody>
+        </table>
       </details>
     </form>
 
