@@ -203,11 +203,14 @@
     </header>
 
     <form id="form" class="card" autocomplete="off">
-      <label class="section" for="file-input">1. Upload .txt export</label>
+      <label class="section" for="file-input">1. Upload your export</label>
       <label id="drop" class="drop" for="file-input">
         <div><strong>Click to choose</strong> or drag a file here</div>
-        <div class="hint">Tab-separated: front &lt;TAB&gt; back · UTF-8 · max 10 MB</div>
-        <input id="file-input" type="file" accept=".txt,text/plain" />
+        <div class="hint">
+          <code>.txt</code> for text-only, or <code>.zip</code> containing the
+          <code>.txt</code> + your images · max 50 MB
+        </div>
+        <input id="file-input" type="file" accept=".txt,.zip,text/plain,application/zip" />
       </label>
 
       <div id="file-info" class="file-info" hidden>
@@ -241,12 +244,19 @@
       <div id="status" class="status" role="status" aria-live="polite"></div>
 
       <details class="help">
-        <summary>How do I export from Anki?</summary>
+        <summary>How do I export from Anki (with images)?</summary>
         <ol>
-          <li>In Anki desktop: <code>File → Export…</code></li>
-          <li>Export format: <strong>Notes in Plain Text (.txt)</strong></li>
-          <li>Pick a deck, uncheck “Include HTML” if you want cleaner text, and save.</li>
-          <li>Upload that <code>.txt</code> file here. Image references are skipped on the web — for embedded images, use the CLI locally.</li>
+          <li>In Anki desktop: <code>File → Export…</code> → <strong>Notes in Plain Text (.txt)</strong>, pick a deck, save.</li>
+          <li>
+            Find your Anki media folder (macOS:
+            <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code>).
+          </li>
+          <li>
+            Put the <code>.txt</code> and the media folder next to each other and zip them
+            (Finder → right-click → <em>Compress</em>). Nested folders inside the zip are
+            fine — images are matched by filename.
+          </li>
+          <li>Upload the <code>.zip</code> here. For a text-only deck, just upload the <code>.txt</code>.</li>
         </ol>
       </details>
     </form>
@@ -341,11 +351,16 @@
       setStatus('<span class="spinner"></span>Converting…');
 
       try {
+        const isZip = /\.zip$/i.test(currentFile.name)
+          || currentFile.type === "application/zip"
+          || currentFile.type === "application/x-zip-compressed";
         const url = "/api/convert?format=" + encodeURIComponent(fmt)
           + "&filename=" + encodeURIComponent(currentFile.name);
         const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "text/plain; charset=utf-8" },
+          headers: {
+            "Content-Type": isZip ? "application/zip" : "text/plain; charset=utf-8",
+          },
           body: currentFile,
         });
 
@@ -361,6 +376,7 @@
         }
 
         const slideCount = res.headers.get("X-Slide-Count");
+        const mediaCount = parseInt(res.headers.get("X-Media-Count") || "0", 10);
         const blob = await res.blob();
         const disposition = res.headers.get("Content-Disposition") || "";
         const match = /filename="([^"]+)"/.exec(disposition);
@@ -374,7 +390,13 @@
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 
-        setStatus("Done — " + (slideCount || "?") + " slides downloaded as " + downloadName, "success");
+        const mediaBlurb = mediaCount > 0
+          ? " (" + mediaCount + " image" + (mediaCount === 1 ? "" : "s") + " embedded)"
+          : "";
+        setStatus(
+          "Done — " + (slideCount || "?") + " slides downloaded as " + downloadName + mediaBlurb,
+          "success"
+        );
       } catch (err) {
         setStatus("Network error: " + (err && err.message ? err.message : err), "error");
       } finally {
