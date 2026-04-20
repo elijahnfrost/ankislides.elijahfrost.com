@@ -353,11 +353,11 @@
     <div class="layout">
     <form id="form" class="card" autocomplete="off">
       <label class="section" for="file-input">1. Upload your export</label>
-      <input id="file-input" class="sr-only-input" type="file" multiple accept=".txt,.zip,.apkg,.colpkg,text/plain,application/zip,application/octet-stream" />
+      <input id="file-input" class="sr-only-input" type="file" multiple accept=".txt,.zip,.apkg,text/plain,application/zip,application/octet-stream" />
       <label id="drop" class="drop" for="file-input">
         <div><strong>Click to choose</strong> or drag files here</div>
         <div class="hint">
-          <code>.apkg</code> · <code>.colpkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB each · multi-file OK
+          <code>.apkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB each · multi-file OK
         </div>
       </label>
 
@@ -387,7 +387,7 @@
 
       <details class="help">
         <summary>Which Anki export should I use?</summary>
-        <p>Easiest is <strong>Anki Deck Package (.apkg)</strong> — single file, images bundled. All four input types below are supported; the right-side table summarizes what survives.</p>
+        <p>Easiest is <strong>Anki Deck Package (.apkg)</strong> — single file, images bundled. The right-side table summarizes what survives for each supported input.</p>
         <table class="compat">
           <thead>
             <tr><th>Anki export option</th><th>Supported</th><th>Notes</th></tr>
@@ -400,8 +400,8 @@
             </tr>
             <tr>
               <td>Anki Collection Package (.colpkg)</td>
-              <td class="good">Yes</td>
-              <td>Full-profile backup. Every note in the collection becomes slides — so it can be big.</td>
+              <td class="bad">Not accepted</td>
+              <td>That's Anki's full-profile backup — routinely multiple GB and always includes media you don't want on slides. Use File → Export → <strong>Current deck</strong> as <code>.apkg</code> instead.</td>
             </tr>
             <tr>
               <td>Notes in Plain Text (.txt)</td>
@@ -461,12 +461,6 @@
             <td><span class="y">✓</span></td>
           </tr>
           <tr>
-            <td>.colpkg</td>
-            <td><span class="y">✓</span></td>
-            <td><span class="y">✓</span></td>
-            <td><span class="y">✓</span></td>
-          </tr>
-          <tr>
             <td>.zip (.txt + media)</td>
             <td><span class="y">✓</span></td>
             <td><span class="y">✓</span></td>
@@ -516,10 +510,66 @@
     let nextId = 1;
     let converting = false;
 
+    // Keep this in sync with MAX_UPLOAD_BYTES in api/convert.py.
+    const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+    const MAX_UPLOAD_LABEL = "50 MB";
+
     function formatBytes(n) {
       if (n < 1024) return n + " B";
       if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-      return (n / (1024 * 1024)).toFixed(2) + " MB";
+      if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + " MB";
+      return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+    }
+
+    // Extensions we accept. .colpkg is Anki's full-profile backup (same binary
+    // format as .apkg but containing the entire collection and all media);
+    // it's almost always multi-GB and almost never what a user wants for
+    // slides, so we reject it explicitly with guidance to use .apkg instead.
+    const ACCEPTED_EXTS = new Set([".apkg", ".zip", ".txt"]);
+
+    function fileExt(file) {
+      return (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+    }
+
+    function describeUnsupported(file) {
+      const ext = fileExt(file);
+      if (ext === ".colpkg") {
+        return (
+          "collection backups (.colpkg) aren't accepted — they contain your "
+          + "whole Anki profile and media library. In Anki, use File → Export "
+          + "→ Current deck, choose Anki Deck Package (.apkg), and drop that "
+          + "instead."
+        );
+      }
+      return (
+        "unsupported file type " + (ext || "(no extension)")
+        + " — drop an .apkg, a .txt, or a .zip containing a .txt plus media."
+      );
+    }
+
+    function describeOversize(file) {
+      const ext = fileExt(file);
+      const size = formatBytes(file.size);
+      const base =
+        "too large (" + size + ", limit " + MAX_UPLOAD_LABEL + ")";
+      if (ext === ".apkg") {
+        return (
+          base +
+          " — try re-exporting just the deck you need, or uncheck Include media."
+        );
+      }
+      if (ext === ".zip") {
+        return (
+          base +
+          " — the zip is probably carrying your whole collection.media folder. " +
+          "Include only images actually referenced by the cards you're exporting, " +
+          "or export as Notes in Plain Text (.txt) without media."
+        );
+      }
+      return (
+        base +
+        " — try exporting a smaller subset from Anki (File → Export → Current deck)."
+      );
     }
 
     function niceType(file) {
@@ -539,13 +589,32 @@
     function addFiles(fileListObj) {
       const seen = new Set(entries.map((e) => entryKey(e.file)));
       let added = 0;
+      const rejected = [];
       for (const file of Array.from(fileListObj || [])) {
         if (seen.has(entryKey(file))) continue;
         seen.add(entryKey(file));
+        const ext = fileExt(file);
+        if (!ACCEPTED_EXTS.has(ext)) {
+          rejected.push({ file, reason: describeUnsupported(file) });
+          continue;
+        }
         entries.push({ id: nextId++, file, state: "pending", message: "" });
         added += 1;
       }
-      if (added > 0) setStatus("");
+      if (rejected.length > 0) {
+        // Surface the first rejection in the status line; if there are several,
+        // show a count so the user knows more were skipped.
+        const first = rejected[0];
+        const extra = rejected.length > 1
+          ? " (and " + (rejected.length - 1) + " more skipped)"
+          : "";
+        setStatus(
+          "Skipped " + first.file.name + " — " + first.reason + extra,
+          "error"
+        );
+      } else if (added > 0) {
+        setStatus("");
+      }
       renderList();
     }
 
@@ -671,17 +740,46 @@
 
     async function convertOne(entry, fmt) {
       const file = entry.file;
-      const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
-      const isBinary = ext === ".zip" || ext === ".apkg" || ext === ".colpkg"
+      const ext = fileExt(file);
+      if (!ACCEPTED_EXTS.has(ext)) {
+        throw new Error(describeUnsupported(file));
+      }
+      if (file.size <= 0) {
+        throw new Error("empty file");
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        throw new Error(describeOversize(file));
+      }
+
+      const isBinary = ext === ".zip" || ext === ".apkg"
         || /zip/i.test(file.type || "");
       const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
       const url = "/api/convert?format=" + encodeURIComponent(fmt)
         + "&filename=" + encodeURIComponent(file.name);
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: file,
-      });
+
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": contentType },
+          body: file,
+        });
+      } catch (err) {
+        // fetch() rejects (rather than returning a non-2xx response) when the
+        // browser never got an HTTP status back — e.g. the server dropped the
+        // connection mid-upload because the body exceeded its ingress limit,
+        // the process isn't running, or the network blipped. The native message
+        // ("NetworkError when attempting to fetch resource") is useless to the
+        // user, so translate it into something actionable.
+        const hint =
+          file.size > 10 * 1024 * 1024
+            ? " The file is " + formatBytes(file.size)
+              + " — if that exceeds the server's upload limit the connection "
+              + "gets cut before a response is sent. Try a smaller export "
+              + "(File → Export → Current deck, uncheck Include media)."
+            : " Check that the converter is reachable, then try again.";
+        throw new Error("could not reach the converter." + hint);
+      }
 
       if (!res.ok) {
         let msg = "Conversion failed (" + res.status + ")";

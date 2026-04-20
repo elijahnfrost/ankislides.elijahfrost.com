@@ -5,9 +5,15 @@ Accepts a POST with one of:
   - a plain ``.zip`` containing one ``.txt`` export plus referenced images
     (the zip may mirror your ``collection.media`` folder — we flatten by
     basename), OR
-  - an Anki ``.apkg`` / ``.colpkg`` bundle: we read the SQLite collection
-    inside, reconstruct a TSV from the ``notes`` table, and extract media
-    with their original filenames so ``<img>`` tags resolve.
+  - an Anki ``.apkg`` bundle: we read the SQLite collection inside,
+    reconstruct a TSV from the ``notes`` table, and extract media with
+    their original filenames so ``<img>`` tags resolve.
+
+``.colpkg`` (Anki's full-profile backup) uses the same binary layout as
+``.apkg`` internally, but it always carries the user's entire media
+library and is routinely multiple GB — so it is rejected up front by
+filename extension with a message pointing the user at the ``.apkg``
+export workflow instead.
 
 Query params:
   - format: one of ``pdf``, ``pptx``, ``png``
@@ -383,7 +389,21 @@ class handler(BaseHTTPRequestHandler):
                 400, f"unsupported format: {fmt!r} (expected pdf, pptx, or png)"
             )
 
-        stem = _clean_stem(qs.get("filename", ["deck"])[0])
+        raw_filename = qs.get("filename", ["deck"])[0] or ""
+        stem = _clean_stem(raw_filename)
+
+        # Anki's .colpkg is a full-profile backup — binary-identical in format
+        # to .apkg but routinely multiple GB and containing every image, audio,
+        # and video file in the user's collection. We gate it out by extension
+        # so accidental uploads fail fast with a clear remedy rather than
+        # eating the whole request body first.
+        if raw_filename.lower().endswith(".colpkg"):
+            return self._send_json_error(
+                415,
+                "collection backups (.colpkg) aren't accepted. In Anki, "
+                "use File \u2192 Export \u2192 Current deck, choose Anki "
+                "Deck Package (.apkg), and upload that instead.",
+            )
 
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -456,7 +476,7 @@ class handler(BaseHTTPRequestHandler):
                     except UnicodeDecodeError:
                         return self._send_json_error(
                             400,
-                            "unrecognized upload — expected a .txt, .zip, .apkg, or .colpkg",
+                            "unrecognized upload — expected a .txt, .zip, or .apkg",
                         )
                 media_count = 0
                 media_dir = Path("/nonexistent-media")

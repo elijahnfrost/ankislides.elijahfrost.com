@@ -23,9 +23,9 @@ Uploads are capped at 50 MB per file (no limit on how many files you drop at onc
 | Anki export option | Supported? | Notes |
 | --- | --- | --- |
 | **Anki Deck Package (.apkg)** | Yes — recommended | One file, images bundled, nothing to tick. Works for newest zstd-compressed bundles. |
-| Anki Collection Package (.colpkg) | Yes | Full-profile backup. Same binary format as `.apkg`. |
 | Notes in Plain Text (.txt) | Yes | Text only. Upload as-is for text-only, or zip with `collection.media` for images. |
 | Cards in Plain Text (.txt) | Yes | Same tab-separated shape, one row per card. |
+| Anki Collection Package (.colpkg) | No | Full-profile backup — routinely multiple GB and always carries your whole media library. Export the deck you want as `.apkg` instead. |
 | PDF / HTML exporter (add-on) | No | Those are output formats, not inputs. |
 
 ### Format quick reference
@@ -33,7 +33,6 @@ Uploads are capped at 50 MB per file (no limit on how many files you drop at onc
 | Input | Text | Images | Single file | Notes |
 | --- | :---: | :---: | :---: | --- |
 | `.apkg` | ✓ | ✓ | ✓ | Easiest path. |
-| `.colpkg` | ✓ | ✓ | ✓ | Whole profile → lots of slides. |
 | `.zip` (.txt + media) | ✓ | ✓ | ✓ | Use when you only have a `.txt`. |
 | `.txt` | ✓ | — | ✓ | Text-only deck. |
 
@@ -115,7 +114,7 @@ Output layout:
 ```
 .
 ├── api/
-│   └── convert.py          # Vercel serverless function — ingests .apkg/.colpkg/.zip/.txt
+│   └── convert.py          # Vercel serverless function — ingests .apkg/.zip/.txt
 ├── anki_to_slides.py       # shared rendering core + CLI entry point
 ├── dev_server.py           # local server that reuses the Vercel handler
 ├── index.html              # web frontend
