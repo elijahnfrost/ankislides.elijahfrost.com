@@ -28,6 +28,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import traceback
 import zipfile
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -144,17 +145,28 @@ def _extract_anki_bundle(body: bytes, dest: Path) -> Tuple[str, int]:
             except OSError:
                 continue
 
+    conn = None
     try:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = None
         cur = conn.cursor()
+        # Detect tables present — newer Anki still uses `notes`, but be defensive.
+        tables = {row[0] for row in cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if "notes" not in tables:
+            raise ValueError(
+                "this collection has no `notes` table (found: "
+                + ", ".join(sorted(tables)) + ")"
+            )
         cur.execute("SELECT flds FROM notes ORDER BY id")
         rows = cur.fetchall()
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -226,13 +238,18 @@ def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
 
 class handler(BaseHTTPRequestHandler):
     def _send_json_error(self, status: int, message: str) -> None:
-        body = f'{{"error": {message!r}}}'.encode("utf-8")
+        body = json.dumps({"error": message}, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+        try:
+            sys.stderr.write(f"[convert] {status}: {message}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
 
     def do_OPTIONS(self) -> None:  # CORS preflight (harmless same-origin too)
         self.send_response(204)
@@ -275,13 +292,18 @@ class handler(BaseHTTPRequestHandler):
                     try:
                         text, media_count = _extract_anki_bundle(raw, Path(workdir))
                     except zipfile.BadZipFile:
+                        traceback.print_exc()
                         return self._send_json_error(400, "the Anki bundle is not a valid archive")
                     except sqlite3.DatabaseError as exc:
+                        traceback.print_exc()
                         return self._send_json_error(
                             400, f"could not read the Anki collection database: {exc}"
                         )
                     except Exception as exc:
-                        return self._send_json_error(400, f"could not parse Anki bundle: {exc}")
+                        traceback.print_exc()
+                        return self._send_json_error(
+                            400, f"could not parse Anki bundle: {type(exc).__name__}: {exc}"
+                        )
                     if not text.strip():
                         return self._send_json_error(
                             400, "the Anki bundle contains no notes"
