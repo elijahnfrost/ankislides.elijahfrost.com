@@ -49,7 +49,11 @@ if _REPO_ROOT not in sys.path:
 import anki_to_slides as ats  # noqa: E402
 
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB safeguard for zips with media
+# Vercel's Python serverless runtime enforces a hard 4.5 MB request-body
+# limit at the platform edge — anything larger is rejected with a bare 413
+# before this handler runs. Match that ceiling here so locally and on
+# Vercel we surface the same friendly message when a file is oversize.
+MAX_UPLOAD_BYTES = 4_500_000  # 4.5 MB — Vercel request body hard limit
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
@@ -413,7 +417,11 @@ class handler(BaseHTTPRequestHandler):
             return self._send_json_error(400, "empty request body")
         if content_length > MAX_UPLOAD_BYTES:
             return self._send_json_error(
-                413, f"file too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"
+                413,
+                f"file too large ({content_length / (1024 * 1024):.2f} MB, "
+                f"max {MAX_UPLOAD_BYTES / (1024 * 1024):.1f} MB). "
+                "Re-export from Anki as File \u2192 Export \u2192 Current deck "
+                "and untick \u201CInclude media\u201D if you don't need images.",
             )
 
         raw = self.rfile.read(content_length)

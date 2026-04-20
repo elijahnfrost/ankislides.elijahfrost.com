@@ -16,7 +16,7 @@ The web app lives in:
 - `index.html` — the frontend (vanilla HTML/CSS/JS, no build step).
 - `api/convert.py` — a Vercel Python function that renders the deck in memory and streams it back.
 
-Uploads are capped at 50 MB per file (no limit on how many files you drop at once), never written to disk beyond a per-request temp directory that's deleted before the response returns.
+Uploads are capped at 4.5 MB per file — Vercel's Python serverless runtime rejects larger request bodies at the platform edge. No limit on how many files you drop at once; nothing is written to disk beyond a per-request temp directory that's deleted before the response returns.
 
 ### Which Anki export to use
 
@@ -50,7 +50,7 @@ Uploads are capped at 50 MB per file (no limit on how many files you drop at onc
 
 Or skip all of this and export an `.apkg` — it already contains everything.
 
-Uploads are capped at 50 MB. Server extracts into a per-request temp dir and deletes it before responding.
+Uploads are capped at 4.5 MB (Vercel platform limit). Server extracts into a per-request temp dir and deletes it before responding.
 
 ### What always gets dropped
 

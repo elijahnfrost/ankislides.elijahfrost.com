@@ -348,7 +348,6 @@
     .file-list {
       display: none;
       flex-direction: column;
-      margin-top: 12px;
       border: 1px solid var(--color-border-section);
       border-top: 0;
     }
@@ -793,7 +792,7 @@
       <label id="drop" class="drop fade-in-up delay-2" for="file-input">
         <div class="title">Click to choose <em>or drag files here</em></div>
         <div class="hint">
-          <code>.apkg</code> &middot; <code>.txt</code> (Notes or Cards in Plain Text) &middot; <code>.zip</code> of a <code>.txt</code> + media &middot; max 50 MB each &middot; multi-file OK
+          <code>.apkg</code> &middot; <code>.txt</code> (Notes or Cards in Plain Text) &middot; <code>.zip</code> of a <code>.txt</code> + media &middot; max 4.5 MB each &middot; multi-file OK
         </div>
       </label>
 
@@ -988,8 +987,13 @@
   let nextId = 1;
   let converting = false;
 
-  const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-  const MAX_UPLOAD_LABEL = "50 MB";
+  // Vercel's Python serverless runtime rejects request bodies larger than
+  // 4.5 MB at the platform edge (before our handler runs), returning a bare
+  // 413 with no JSON body. Mirror that hard limit here so we can reject
+  // oversize files client-side with an actionable message instead of
+  // surfacing "CONVERSION FAILED (413)" after a round-trip.
+  const MAX_UPLOAD_BYTES = Math.floor(4.5 * 1024 * 1024);
+  const MAX_UPLOAD_LABEL = "4.5 MB";
 
   function formatBytes(n) {
     if (n < 1024) return n + " B";
@@ -1253,12 +1257,24 @@
     }
 
     if (!res.ok) {
-      let msg = "Conversion failed (" + res.status + ")";
+      // Try to surface the server's JSON error first. Vercel's platform
+      // (e.g. 413 for oversize uploads) responds with no JSON body, so we
+      // fall back to a format-specific message rather than a bare status.
+      let serverMsg = null;
       try {
         const j = await res.json();
-        if (j && j.error) msg = j.error;
+        if (j && j.error) serverMsg = j.error;
       } catch (_) {}
-      throw new Error(msg);
+      if (serverMsg) throw new Error(serverMsg);
+      if (res.status === 413) {
+        throw new Error(
+          "too large for the server (" + formatBytes(file.size)
+          + ", platform limit " + MAX_UPLOAD_LABEL + "). Re-export a smaller "
+          + "deck: File → Export → Current deck, and untick Include media "
+          + "if you don't need images."
+        );
+      }
+      throw new Error("conversion failed (" + res.status + ")");
     }
 
     const slideCount = res.headers.get("X-Slide-Count");
