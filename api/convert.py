@@ -2,9 +2,12 @@
 
 Accepts a POST with one of:
   - a UTF-8 tab-separated Anki export (``.txt``) as the raw body, OR
-  - a ``.zip`` containing exactly one ``.txt`` export plus any referenced
-    image files (the zip may mirror your ``collection.media`` folder; we
-    flatten by basename when resolving ``<img src="...">`` references).
+  - a plain ``.zip`` containing one ``.txt`` export plus referenced images
+    (the zip may mirror your ``collection.media`` folder — we flatten by
+    basename), OR
+  - an Anki ``.apkg`` / ``.colpkg`` bundle: we read the SQLite collection
+    inside, reconstruct a TSV from the ``notes`` table, and extract media
+    with their original filenames so ``<img>`` tags resolve.
 
 Query params:
   - format: one of ``pdf``, ``pptx``, ``png``
@@ -16,10 +19,13 @@ before the response returns.
 """
 from __future__ import annotations
 
+import csv
 import io
+import json
 import os
 import re
 import shutil
+import sqlite3
 import sys
 import tempfile
 import zipfile
@@ -58,11 +64,117 @@ def _clean_stem(raw: str) -> str:
     return stem[:80]
 
 
-def _looks_like_zip(content_type: str, body: bytes) -> bool:
-    ct = (content_type or "").lower()
-    if "zip" in ct:
-        return True
+def _looks_like_zip(body: bytes) -> bool:
     return body[:4] == _ZIP_MAGIC
+
+
+_ANKI_DB_NAMES = ("collection.anki21b", "collection.anki21", "collection.anki2")
+
+
+def _is_anki_bundle(body: bytes) -> bool:
+    """Check whether a zip body is an Anki .apkg/.colpkg (vs. a plain .zip)."""
+    if not _looks_like_zip(body):
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(body)) as zf:
+            names = set(zf.namelist())
+    except zipfile.BadZipFile:
+        return False
+    return any(n in names for n in _ANKI_DB_NAMES)
+
+
+def _decompress_anki_db(raw: bytes, db_name: str) -> bytes:
+    """Return uncompressed SQLite bytes for an Anki collection file."""
+    if not db_name.endswith(".anki21b"):
+        return raw
+    try:
+        import zstandard as zstd  # lazy import — only needed for newest .apkg
+    except ImportError as exc:  # pragma: no cover - requirements.txt pins it
+        raise RuntimeError(
+            "this .apkg uses the newest zstd-compressed schema; add "
+            "`zstandard` to requirements.txt"
+        ) from exc
+    return zstd.ZstdDecompressor().decompress(raw)
+
+
+def _extract_anki_bundle(body: bytes, dest: Path) -> Tuple[str, int]:
+    """Extract an ``.apkg`` or ``.colpkg`` into ``dest``.
+
+    Returns ``(reconstructed_tsv_text, media_count)``. The TSV mirrors
+    Anki's "Notes in Plain Text (.txt)" export with HTML included so the
+    downstream parser can treat it identically to a direct text upload.
+    Media files are renamed to their original filenames so ``<img src>``
+    references resolve against ``dest``.
+    """
+    with zipfile.ZipFile(io.BytesIO(body)) as zf:
+        names = set(zf.namelist())
+        db_name = next((n for n in _ANKI_DB_NAMES if n in names), None)
+        if db_name is None:
+            raise ValueError("no Anki collection file found inside the archive")
+
+        db_bytes = _decompress_anki_db(zf.read(db_name), db_name)
+        db_path = dest / "_collection.sqlite"
+        db_path.write_bytes(db_bytes)
+
+        media_map: dict = {}
+        if "media" in names:
+            try:
+                media_raw = zf.read("media")
+                media_map = json.loads(media_raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                media_map = {}
+
+        media_count = 0
+        for numeric_id, original_name in media_map.items():
+            if not isinstance(original_name, str):
+                continue
+            basename = os.path.basename(original_name)
+            if not basename:
+                continue
+            ext = os.path.splitext(basename)[1].lower()
+            if ext not in _IMAGE_EXTS:
+                continue  # skip audio/video — slide decks can't use them
+            try:
+                data = zf.read(str(numeric_id))
+            except KeyError:
+                continue
+            try:
+                (dest / basename).write_bytes(data)
+                media_count += 1
+            except OSError:
+                continue
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = None
+        cur = conn.cursor()
+        cur.execute("SELECT flds FROM notes ORDER BY id")
+        rows = cur.fetchall()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    for (flds,) in rows:
+        if flds is None:
+            continue
+        parts = str(flds).split("\x1f")
+        front = parts[0] if len(parts) >= 1 else ""
+        back = parts[1] if len(parts) >= 2 else parts[0] if parts else ""
+        if not front and not back:
+            continue
+        writer.writerow([front, back])
+
+    # Best-effort cleanup of the db file so it isn't handed to the renderer.
+    try:
+        db_path.unlink()
+    except OSError:
+        pass
+
+    return buf.getvalue(), media_count
 
 
 def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
@@ -152,22 +264,40 @@ class handler(BaseHTTPRequestHandler):
             )
 
         raw = self.rfile.read(content_length)
-        content_type = self.headers.get("Content-Type", "")
 
         workdir: Optional[str] = None
+        source_kind = "txt"
         try:
-            if _looks_like_zip(content_type, raw):
+            if _looks_like_zip(raw):
                 workdir = tempfile.mkdtemp(prefix="anki-slides-")
-                try:
-                    text, media_count = _extract_zip_flat(raw, Path(workdir))
-                except zipfile.BadZipFile:
-                    return self._send_json_error(400, "uploaded file is not a valid .zip")
-                if text is None:
-                    return self._send_json_error(
-                        400,
-                        "no .txt file found inside the zip — include your Anki "
-                        "'Notes in Plain Text (.txt)' export alongside the images",
-                    )
+                if _is_anki_bundle(raw):
+                    source_kind = "apkg"
+                    try:
+                        text, media_count = _extract_anki_bundle(raw, Path(workdir))
+                    except zipfile.BadZipFile:
+                        return self._send_json_error(400, "the Anki bundle is not a valid archive")
+                    except sqlite3.DatabaseError as exc:
+                        return self._send_json_error(
+                            400, f"could not read the Anki collection database: {exc}"
+                        )
+                    except Exception as exc:
+                        return self._send_json_error(400, f"could not parse Anki bundle: {exc}")
+                    if not text.strip():
+                        return self._send_json_error(
+                            400, "the Anki bundle contains no notes"
+                        )
+                else:
+                    source_kind = "zip"
+                    try:
+                        text, media_count = _extract_zip_flat(raw, Path(workdir))
+                    except zipfile.BadZipFile:
+                        return self._send_json_error(400, "uploaded file is not a valid .zip")
+                    if text is None:
+                        return self._send_json_error(
+                            400,
+                            "no .txt file found inside the zip — include your Anki "
+                            "'Notes in Plain Text (.txt)' export alongside the images",
+                        )
                 media_dir = Path(workdir)
             else:
                 try:
@@ -178,8 +308,7 @@ class handler(BaseHTTPRequestHandler):
                     except UnicodeDecodeError:
                         return self._send_json_error(
                             400,
-                            "input must be a UTF-8 tab-separated .txt (or a .zip "
-                            "containing the .txt plus your media files)",
+                            "unrecognized upload — expected a .txt, .zip, .apkg, or .colpkg",
                         )
                 media_count = 0
                 media_dir = Path("/nonexistent-media")
@@ -214,11 +343,12 @@ class handler(BaseHTTPRequestHandler):
         )
         self.send_header("X-Slide-Count", str(len(sides)))
         self.send_header("X-Media-Count", str(media_count))
+        self.send_header("X-Source-Kind", source_kind)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header(
             "Access-Control-Expose-Headers",
-            "X-Slide-Count, X-Media-Count, Content-Disposition",
+            "X-Slide-Count, X-Media-Count, X-Source-Kind, Content-Disposition",
         )
         self.end_headers()
         self.wfile.write(payload)

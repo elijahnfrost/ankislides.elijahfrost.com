@@ -97,6 +97,16 @@ ANKI_ANSWER_SEP_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Anki audio/video references like [sound:foo.mp3] — slides can't play these,
+# so strip them entirely rather than leaving literal brackets in the text.
+SOUND_TAG_RE = re.compile(r'\[sound:[^\]]*\]', re.IGNORECASE)
+
+# Cloze deletions: {{c1::answer}} or {{c1::answer::hint}}. In .txt exports with
+# "Include HTML" these are rendered by Anki, but when we reconstruct notes from
+# a raw .apkg/.colpkg SQLite we see the source. Unwrap to just the answer so
+# the slide shows something sensible instead of {{c1::…}}.
+CLOZE_RE = re.compile(r'\{\{c\d+::(.*?)(?:::[^}]*)?\}\}', re.DOTALL)
+
 
 @dataclass
 class CardSide:
@@ -112,6 +122,9 @@ def parse_side(raw: str, media_dir: Path, is_back: bool = False) -> CardSide:
 
     if is_back:
         raw = ANKI_ANSWER_SEP_RE.sub("", raw, count=1)
+
+    raw = SOUND_TAG_RE.sub("", raw)
+    raw = CLOZE_RE.sub(r"\1", raw)
 
     images: List[Path] = []
 

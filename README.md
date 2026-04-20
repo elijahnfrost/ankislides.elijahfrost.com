@@ -1,13 +1,13 @@
 # Anki → Slides
 
-Convert an Anki plain-text card export into a clean 16:9 slide deck — **PDF**, **PowerPoint (.pptx)**, or **PNG** (bundled as a `.zip`).
+Convert any Anki export into a clean 16:9 slide deck — **PDF**, **PowerPoint (.pptx)**, or **PNG** (bundled as a `.zip`).
 
-Front and back of each card become separate slides, in order (`front1, back1, front2, back2, …`), with shrink-to-fit text layout. Basic HTML is stripped and Anki's `<hr id="answer">` separator is respected.
+Front and back of each card become separate slides, in order (`front1, back1, front2, back2, …`), with shrink-to-fit text layout. Basic HTML is stripped, Anki's `<hr id="answer">` separator is respected, `[sound:…]` tags are dropped, and `{{c1::…}}` cloze deletions are unwrapped to their answer.
 
 There are two ways to use it:
 
-- **Web app** (this repo, deployed on Vercel) — upload a `.txt`, pick a format, download the deck. Nothing is stored on the server.
-- **CLI** (`anki_to_slides.py`) — runs locally, can also embed images from your Anki media folder.
+- **Web app** (this repo, deployed on Vercel) — drop any supported Anki export, pick a format, download the deck. Nothing is stored on the server.
+- **CLI** (`anki_to_slides.py`) — runs locally from `.txt` + local media folder.
 
 ## Web app
 
@@ -22,42 +22,47 @@ Uploads are capped at 10 MB, never written to disk, and the function's working d
 
 | Anki export option | Supported? | Notes |
 | --- | --- | --- |
-| **Notes in Plain Text (.txt)** | Yes — use this | Tab-separated front/back. `<img>` references are kept when "Include HTML" is on. |
-| Cards in Plain Text (.txt) | Works | Same tab-separated shape, one row per card rather than per note. |
-| Anki Deck Package (.apkg) | No | Binary SQLite bundle. Convert to Notes in Plain Text first. |
-| Anki Collection Package (.colpkg) | No | Full profile backup; same binary format. |
+| **Anki Deck Package (.apkg)** | Yes — recommended | One file, images bundled, nothing to tick. Works for newest zstd-compressed bundles. |
+| Anki Collection Package (.colpkg) | Yes | Full-profile backup. Same binary format as `.apkg`. |
+| Notes in Plain Text (.txt) | Yes | Text only. Upload as-is for text-only, or zip with `collection.media` for images. |
+| Cards in Plain Text (.txt) | Yes | Same tab-separated shape, one row per card. |
 | PDF / HTML exporter (add-on) | No | Those are output formats, not inputs. |
 
-### Export steps (with images)
+### Format quick reference
 
-1. In Anki: **File → Export…**
-2. Export format: **Notes in Plain Text (.txt)**
-3. Check **Include HTML and media references** (required for images to survive the export).
-4. Leave "Include tags" and "Include deck name" off — they just clutter the slides.
-5. Save the `.txt`.
-6. Locate your media folder:
+| Input | Text | Images | Single file | Notes |
+| --- | :---: | :---: | :---: | --- |
+| `.apkg` | ✓ | ✓ | ✓ | Easiest path. |
+| `.colpkg` | ✓ | ✓ | ✓ | Whole profile → lots of slides. |
+| `.zip` (.txt + media) | ✓ | ✓ | ✓ | Use when you only have a `.txt`. |
+| `.txt` | ✓ | — | ✓ | Text-only deck. |
+
+### Using a `.txt` export with images
+
+1. In Anki: **File → Export…** → **Notes in Plain Text (.txt)**.
+2. Check **Include HTML and media references** (required — without it the `<img>` tags never make it into the file).
+3. Leave "Include tags" and "Include deck name" off.
+4. Save the `.txt`.
+5. Locate your media folder (or use `Tools → Check Media…`):
    - macOS: `~/Library/Application Support/Anki2/<profile>/collection.media`
    - Windows: `%APPDATA%\Anki2\<profile>\collection.media`
    - Linux: `~/.local/share/Anki2/<profile>/collection.media`
-   - Or use `Tools → Check Media…` in Anki to see the path.
-7. Select the `.txt` **and** the `collection.media` folder, right-click → **Compress** (macOS) or **Send to → Compressed folder** (Windows). Drop the resulting `.zip` on the page.
+6. Select the `.txt` **and** the `collection.media` folder, right-click → **Compress**. Drop the resulting `.zip`.
 
-For a text-only deck, upload the `.txt` directly — no zip needed.
+Or skip all of this and export an `.apkg` — it already contains everything.
 
-Uploads are capped at 50 MB. The server extracts into a per-request temp dir and deletes it before the response returns.
+Uploads are capped at 50 MB. Server extracts into a per-request temp dir and deletes it before responding.
 
-### What makes it into the slide vs. what gets dropped
+### What always gets dropped
 
 | Content | Result |
 | --- | --- |
-| Card front / back text | One slide each (front1, back1, front2, back2, …) |
-| Line breaks (`<br>`, newlines) | Preserved |
-| Images (`<img src>`) | Embedded if you upload the zip with media; dropped otherwise |
-| Bold / italic / color / fonts | Stripped — slides use a single typeface |
+| Bold / italic / colors / custom fonts | Stripped — slides use a single typeface |
+| Audio / video (`[sound:…]`) | Dropped |
 | MathJax / LaTeX (`\[ … \]`) | Kept as raw source, not rendered |
-| Audio / video (`[sound:…]`) | Silently dropped |
-| Cloze deletions (`{{c1::…}}`) | Shown as raw text — export with "Include HTML" to get the rendered HTML |
-| Tags, deck name, scheduling data | Not included |
+| Cloze deletions (`{{c1::…}}`) | Unwrapped to the answer text |
+| Tags, deck name, scheduling | Not included |
+| Line breaks (`<br>`, newlines) | **Preserved** |
 
 ### Running locally (web)
 
@@ -110,10 +115,11 @@ Output layout:
 ```
 .
 ├── api/
-│   └── convert.py          # Vercel serverless function (in-memory conversion)
+│   └── convert.py          # Vercel serverless function — ingests .apkg/.colpkg/.zip/.txt
 ├── anki_to_slides.py       # shared rendering core + CLI entry point
+├── dev_server.py           # local server that reuses the Vercel handler
 ├── index.html              # web frontend
-├── requirements.txt        # Python deps (reportlab, python-pptx, Pillow)
+├── requirements.txt        # Python deps (reportlab, python-pptx, Pillow, zstandard)
 ├── vercel.json             # function timeout
 └── .python-version         # Python 3.12
 ```

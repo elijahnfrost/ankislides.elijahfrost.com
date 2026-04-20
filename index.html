@@ -32,11 +32,21 @@
       -webkit-font-smoothing: antialiased;
     }
     main {
-      max-width: 720px;
+      max-width: 1120px;
       margin: 0 auto;
-      padding: 64px 24px 96px;
+      padding: 56px 24px 96px;
     }
-    header { margin-bottom: 32px; }
+    header { margin-bottom: 28px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 24px;
+      align-items: start;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+    }
     h1 {
       font-size: 34px;
       letter-spacing: -0.02em;
@@ -158,7 +168,7 @@
     .status.success { color: var(--success); }
 
     footer {
-      margin-top: 24px;
+      margin-top: 32px;
       color: var(--muted);
       font-size: 12px;
       text-align: center;
@@ -206,6 +216,71 @@
     table.compat th { color: var(--text); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
     table.compat td.good { color: var(--success); }
     table.compat td.bad { color: var(--danger); }
+
+    aside.sidebar {
+      position: sticky;
+      top: 24px;
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 20px 14px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+    }
+    aside.sidebar h2 {
+      margin: 0 0 12px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    aside.sidebar table.ref {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    aside.sidebar table.ref th,
+    aside.sidebar table.ref td {
+      padding: 6px 4px;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+      vertical-align: middle;
+    }
+    aside.sidebar table.ref th:first-child,
+    aside.sidebar table.ref td:first-child {
+      text-align: left;
+      font-weight: 500;
+      color: var(--text);
+    }
+    aside.sidebar table.ref th {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom-color: var(--border);
+    }
+    aside.sidebar tr:last-child td { border-bottom: 0; }
+    aside.sidebar td .y { color: var(--success); font-weight: 600; }
+    aside.sidebar td .n { color: var(--muted); opacity: 0.6; }
+    aside.sidebar td .m { color: #f4c36b; font-size: 11px; }
+    aside.sidebar .note {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    aside.sidebar .note strong { color: var(--text); }
+    aside.sidebar .drop-list {
+      margin: 6px 0 0;
+      padding-left: 16px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+    aside.sidebar .drop-list li { margin-bottom: 2px; }
     kbd {
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid var(--border);
@@ -234,19 +309,18 @@
   <main>
     <header>
       <h1>Anki → Slides</h1>
-      <p>Drop an Anki plain-text export and download a 16:9 slide deck. Front and back become separate slides, in order. Nothing is stored — files are converted on the fly.</p>
+      <p>Drop any Anki export and download a 16:9 slide deck. Front and back become separate slides, in order. Nothing is stored — files are converted on the fly.</p>
     </header>
 
+    <div class="layout">
     <form id="form" class="card" autocomplete="off">
       <label class="section" for="file-input">1. Upload your export</label>
       <label id="drop" class="drop" for="file-input">
         <div><strong>Click to choose</strong> or drag a file here</div>
         <div class="hint">
-          Anki <code>Notes in Plain Text (.txt)</code>, or a <code>.zip</code>
-          containing that <code>.txt</code> + your <code>collection.media</code>
-          folder for images · max 50 MB
+          <code>.apkg</code> · <code>.colpkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB
         </div>
-        <input id="file-input" type="file" accept=".txt,.zip,text/plain,application/zip" />
+        <input id="file-input" type="file" accept=".txt,.zip,.apkg,.colpkg,text/plain,application/zip,application/octet-stream" />
       </label>
 
       <div id="file-info" class="file-info" hidden>
@@ -281,88 +355,115 @@
 
       <details class="help">
         <summary>Which Anki export should I use?</summary>
-        <p>Only one of Anki's export options is supported. Pick <strong>Notes in Plain Text (.txt)</strong>.</p>
+        <p>Easiest is <strong>Anki Deck Package (.apkg)</strong> — single file, images bundled. All four input types below are supported; the right-side table summarizes what survives.</p>
         <table class="compat">
           <thead>
-            <tr><th>Anki export option</th><th>Supported?</th><th>Why</th></tr>
+            <tr><th>Anki export option</th><th>Supported</th><th>Notes</th></tr>
           </thead>
           <tbody>
             <tr>
-              <td><strong>Notes in Plain Text (.txt)</strong></td>
-              <td class="good">Yes — use this</td>
-              <td>Tab-separated front/back; image references (<code>&lt;img src&gt;</code>) survive when “Include HTML” is on.</td>
-            </tr>
-            <tr>
-              <td>Cards in Plain Text (.txt)</td>
-              <td class="good">Works</td>
-              <td>Same tab-separated shape, one row per card instead of per note.</td>
-            </tr>
-            <tr>
-              <td>Anki Deck Package (.apkg)</td>
-              <td class="bad">No</td>
-              <td>Binary SQLite bundle. Not parsed — convert to Notes in Plain Text first.</td>
+              <td><strong>Anki Deck Package (.apkg)</strong></td>
+              <td class="good">Yes — recommended</td>
+              <td>One file, images bundled, nothing to tick. Works for the newest zstd-compressed bundles too.</td>
             </tr>
             <tr>
               <td>Anki Collection Package (.colpkg)</td>
-              <td class="bad">No</td>
-              <td>Full profile backup; same binary format as <code>.apkg</code>.</td>
+              <td class="good">Yes</td>
+              <td>Full-profile backup. Every note in the collection becomes slides — so it can be big.</td>
+            </tr>
+            <tr>
+              <td>Notes in Plain Text (.txt)</td>
+              <td class="good">Yes</td>
+              <td>Text only. To include images, tick <strong>Include HTML and media references</strong> and upload as a zip with <code>collection.media</code>.</td>
+            </tr>
+            <tr>
+              <td>Cards in Plain Text (.txt)</td>
+              <td class="good">Yes</td>
+              <td>Same shape as Notes, one row per card rather than per note.</td>
             </tr>
             <tr>
               <td>PDF / HTML exporter (add-on)</td>
-              <td class="bad">No</td>
-              <td>Those are output formats, not inputs.</td>
+              <td class="bad">Output only</td>
+              <td>Those are result formats, not inputs.</td>
             </tr>
           </tbody>
         </table>
       </details>
 
       <details class="help">
-        <summary>Exact export steps (with images)</summary>
+        <summary>Using a .txt export with images</summary>
         <ol>
-          <li>In Anki desktop: <kbd>File</kbd> → <kbd>Export…</kbd></li>
-          <li><strong>Export format:</strong> Notes in Plain Text (.txt)</li>
-          <li><strong>Include:</strong> pick one deck, or leave <em>All Decks</em>.</li>
+          <li>In Anki: <kbd>File</kbd> → <kbd>Export…</kbd> → <strong>Notes in Plain Text (.txt)</strong>.</li>
+          <li>Tick <strong>Include HTML and media references</strong>. Without this the <code>&lt;img&gt;</code> tags never make it into the file, so the images can't be matched later.</li>
+          <li>Leave “Include tags” and “Include deck name” off — they clutter the slides.</li>
           <li>
-            Check <strong>Include HTML and media references</strong>.
-            <br/><span style="font-size:12px">Without it, Anki strips the <code>&lt;img&gt;</code> tags and your images can't be matched — you'll get a text-only deck even if you zip media.</span>
-          </li>
-          <li>Leave “Include tags” and “Include deck name” off (they'd clutter the slides).</li>
-          <li>Save the <code>.txt</code>.</li>
-          <li>
-            Find your media folder:
+            Find your media folder — <kbd>Tools</kbd> → <kbd>Check Media…</kbd> shows the path. Defaults:
             <ul>
-              <li><strong>macOS:</strong> <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code></li>
-              <li><strong>Windows:</strong> <code>%APPDATA%\Anki2\&lt;profile&gt;\collection.media</code></li>
-              <li><strong>Linux:</strong> <code>~/.local/share/Anki2/&lt;profile&gt;/collection.media</code></li>
+              <li>macOS: <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code></li>
+              <li>Windows: <code>%APPDATA%\Anki2\&lt;profile&gt;\collection.media</code></li>
+              <li>Linux: <code>~/.local/share/Anki2/&lt;profile&gt;/collection.media</code></li>
             </ul>
-            Or from Anki: <kbd>Tools</kbd> → <kbd>Check Media…</kbd> shows the path.
           </li>
-          <li>
-            Select the <code>.txt</code> <em>and</em> the <code>collection.media</code> folder in your
-            file manager, right-click → <strong>Compress</strong> (macOS) or <strong>Send to → Compressed folder</strong>
-            (Windows). Drop the resulting <code>.zip</code> onto the upload box.
-          </li>
+          <li>Select the <code>.txt</code> and the <code>collection.media</code> folder, right-click → <strong>Compress</strong>. Drop the resulting <code>.zip</code>.</li>
         </ol>
-        <p style="font-size:12px">Nested folders inside the zip are fine. Images are matched by filename, so <code>collection.media/abc.png</code> and <code>abc.png</code> both resolve.</p>
-      </details>
-
-      <details class="help">
-        <summary>What makes it into the slide vs. what gets dropped</summary>
-        <table class="compat">
-          <thead><tr><th>Content</th><th>Result</th></tr></thead>
-          <tbody>
-            <tr><td>Card front / back text</td><td class="good">One slide each (front1, back1, front2, back2, …)</td></tr>
-            <tr><td>Line breaks (<code>&lt;br&gt;</code>, newlines)</td><td class="good">Preserved</td></tr>
-            <tr><td>Images (<code>&lt;img src&gt;</code>)</td><td class="good">Embedded — but only if you upload the <code>.zip</code> with media</td></tr>
-            <tr><td>Bold / italic / color / fonts</td><td class="bad">Stripped — slides use a single clean typeface</td></tr>
-            <tr><td>MathJax / LaTeX (<code>\[ … \]</code>)</td><td class="bad">Kept as raw source, not rendered</td></tr>
-            <tr><td>Audio / video ([sound:…] tags)</td><td class="bad">Silently dropped — slide decks can't play them</td></tr>
-            <tr><td>Cloze deletions ({{c1::…}})</td><td class="bad">Shown as raw text; export with “Include HTML” to see the card's actual rendered HTML.</td></tr>
-            <tr><td>Tags, deck name, scheduling data</td><td class="bad">Not included</td></tr>
-          </tbody>
-        </table>
+        <p style="font-size:12px">Or skip all of this and export an <code>.apkg</code> instead — it already contains everything.</p>
       </details>
     </form>
+
+    <aside class="sidebar" aria-label="Format quick reference">
+      <h2>What's included, by input format</h2>
+      <table class="ref">
+        <thead>
+          <tr>
+            <th></th>
+            <th title="Card front and back text">Text</th>
+            <th title="&lt;img src&gt; references, embedded into slides">Images</th>
+            <th title="Single-file upload">Single file</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>.apkg</td>
+            <td><span class="y">✓</span></td>
+            <td><span class="y">✓</span></td>
+            <td><span class="y">✓</span></td>
+          </tr>
+          <tr>
+            <td>.colpkg</td>
+            <td><span class="y">✓</span></td>
+            <td><span class="y">✓</span></td>
+            <td><span class="y">✓</span></td>
+          </tr>
+          <tr>
+            <td>.zip (.txt + media)</td>
+            <td><span class="y">✓</span></td>
+            <td><span class="y">✓</span></td>
+            <td><span class="y">✓</span></td>
+          </tr>
+          <tr>
+            <td>.txt only</td>
+            <td><span class="y">✓</span></td>
+            <td><span class="n">—</span></td>
+            <td><span class="y">✓</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <strong>Always dropped, in every format:</strong>
+        <ul class="drop-list">
+          <li>Bold / italic / colors / custom fonts</li>
+          <li>Audio &amp; video (<code>[sound:…]</code>)</li>
+          <li>MathJax / LaTeX stays as raw source</li>
+          <li>Tags, deck name, scheduling</li>
+        </ul>
+      </div>
+
+      <div class="note">
+        Cloze deletions <code>{{c1::…}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved.
+      </div>
+    </aside>
+    </div>
 
     <footer>
       Runs entirely on a serverless function · no uploads are persisted
@@ -454,16 +555,15 @@
       setStatus('<span class="spinner"></span>Converting…');
 
       try {
-        const isZip = /\.zip$/i.test(currentFile.name)
-          || currentFile.type === "application/zip"
-          || currentFile.type === "application/x-zip-compressed";
+        const ext = (currentFile.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+        const isBinary = ext === ".zip" || ext === ".apkg" || ext === ".colpkg"
+          || /zip/i.test(currentFile.type || "");
+        const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
         const url = "/api/convert?format=" + encodeURIComponent(fmt)
           + "&filename=" + encodeURIComponent(currentFile.name);
         const res = await fetch(url, {
           method: "POST",
-          headers: {
-            "Content-Type": isZip ? "application/zip" : "text/plain; charset=utf-8",
-          },
+          headers: { "Content-Type": contentType },
           body: currentFile,
         });
 
