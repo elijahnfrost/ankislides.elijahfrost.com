@@ -70,6 +70,7 @@ def _looks_like_zip(body: bytes) -> bool:
 
 
 _ANKI_DB_NAMES = ("collection.anki21b", "collection.anki21", "collection.anki2")
+_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 
 
 def _is_anki_bundle(body: bytes) -> bool:
@@ -84,18 +85,136 @@ def _is_anki_bundle(body: bytes) -> bool:
     return any(n in names for n in _ANKI_DB_NAMES)
 
 
-def _decompress_anki_db(raw: bytes, db_name: str) -> bytes:
-    """Return uncompressed SQLite bytes for an Anki collection file."""
-    if not db_name.endswith(".anki21b"):
-        return raw
+def _zstd_decompress(raw: bytes) -> bytes:
+    """Decompress a zstd frame that may lack the content size in its header.
+
+    Anki writes zstd frames without the declared content size, so the
+    one-shot ``ZstdDecompressor.decompress(raw)`` call raises
+    ``ZstdError: could not determine content size in frame header``. A
+    streaming reader handles both variants transparently.
+    """
     try:
         import zstandard as zstd  # lazy import — only needed for newest .apkg
     except ImportError as exc:  # pragma: no cover - requirements.txt pins it
         raise RuntimeError(
-            "this .apkg uses the newest zstd-compressed schema; add "
-            "`zstandard` to requirements.txt"
+            "this .apkg uses the newest zstd-compressed schema but the "
+            "`zstandard` package is not installed on the server"
         ) from exc
-    return zstd.ZstdDecompressor().decompress(raw)
+    dctx = zstd.ZstdDecompressor()
+    buf = io.BytesIO()
+    with dctx.stream_reader(io.BytesIO(raw)) as reader:
+        shutil.copyfileobj(reader, buf)
+    return buf.getvalue()
+
+
+def _decompress_anki_db(raw: bytes, db_name: str) -> bytes:
+    """Return uncompressed SQLite bytes for an Anki collection file."""
+    if db_name.endswith(".anki21b"):
+        return _zstd_decompress(raw)
+    return raw
+
+
+def _maybe_zstd(raw: bytes) -> bytes:
+    """If ``raw`` begins with the zstd magic, decompress it; otherwise return as-is.
+
+    Anki's v3 package format stores both the ``media`` manifest and the
+    individual media blobs as zstd-compressed streams. Older formats
+    store them raw. Sniffing the magic makes the extractor format-agnostic.
+    """
+    if len(raw) >= 4 and raw[:4] == _ZSTD_MAGIC:
+        try:
+            return _zstd_decompress(raw)
+        except Exception:
+            return raw
+    return raw
+
+
+def _read_varint(data: bytes, pos: int) -> Tuple[int, int]:
+    """Minimal protobuf varint reader. Returns ``(value, new_pos)``."""
+    result = 0
+    shift = 0
+    while pos < len(data):
+        byte = data[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if not (byte & 0x80):
+            return result, pos
+        shift += 7
+        if shift > 63:
+            raise ValueError("varint too long")
+    raise ValueError("truncated varint")
+
+
+def _skip_proto_field(data: bytes, pos: int, wire_type: int) -> int:
+    if wire_type == 0:  # varint
+        _, pos = _read_varint(data, pos)
+    elif wire_type == 2:  # length-delimited
+        length, pos = _read_varint(data, pos)
+        pos += length
+    elif wire_type == 1:  # 64-bit
+        pos += 8
+    elif wire_type == 5:  # 32-bit
+        pos += 4
+    else:
+        raise ValueError(f"unsupported wire type {wire_type}")
+    return pos
+
+
+def _parse_media_entries_proto(data: bytes) -> dict:
+    """Parse Anki's ``MediaEntries`` protobuf into ``{index_str: filename}``.
+
+    Anki's v3 ``media`` manifest is a protobuf message ``MediaEntries`` with
+    a single repeated field ``entries`` (field #1) of ``MediaEntry`` submessages,
+    whose first field is the original filename (field #1, string). Each entry's
+    index within the list matches the numeric filename of the media blob inside
+    the archive (``"0"``, ``"1"``, ``"2"``, …).
+    """
+    result: dict = {}
+    index = 0
+    pos = 0
+    while pos < len(data):
+        tag, pos = _read_varint(data, pos)
+        field_num = tag >> 3
+        wire_type = tag & 0x7
+        if field_num == 1 and wire_type == 2:
+            entry_len, pos = _read_varint(data, pos)
+            entry_end = pos + entry_len
+            name: Optional[str] = None
+            while pos < entry_end:
+                sub_tag, pos = _read_varint(data, pos)
+                sub_field = sub_tag >> 3
+                sub_wire = sub_tag & 0x7
+                if sub_field == 1 and sub_wire == 2:
+                    name_len, pos = _read_varint(data, pos)
+                    name = data[pos : pos + name_len].decode("utf-8", errors="replace")
+                    pos += name_len
+                else:
+                    pos = _skip_proto_field(data, pos, sub_wire)
+            if name:
+                result[str(index)] = name
+            index += 1
+        else:
+            pos = _skip_proto_field(data, pos, wire_type)
+    return result
+
+
+def _parse_media_manifest(raw: bytes) -> dict:
+    """Parse Anki's ``media`` manifest regardless of package version.
+
+    - v1/v2 (``.anki2`` / ``.anki21``): JSON ``{"<numeric_id>": "<name>"}``.
+    - v3    (``.anki21b``): zstd-compressed protobuf ``MediaEntries``.
+    """
+    payload = _maybe_zstd(raw)
+    try:
+        parsed = json.loads(payload.decode("utf-8"))
+        if isinstance(parsed, dict):
+            return {str(k): v for k, v in parsed.items() if isinstance(v, str)}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    try:
+        return _parse_media_entries_proto(payload)
+    except Exception:
+        return {}
 
 
 def _extract_anki_bundle(body: bytes, dest: Path) -> Tuple[str, int]:
@@ -119,11 +238,7 @@ def _extract_anki_bundle(body: bytes, dest: Path) -> Tuple[str, int]:
 
         media_map: dict = {}
         if "media" in names:
-            try:
-                media_raw = zf.read("media")
-                media_map = json.loads(media_raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                media_map = {}
+            media_map = _parse_media_manifest(zf.read("media"))
 
         media_count = 0
         for numeric_id, original_name in media_map.items():
@@ -139,6 +254,7 @@ def _extract_anki_bundle(body: bytes, dest: Path) -> Tuple[str, int]:
                 data = zf.read(str(numeric_id))
             except KeyError:
                 continue
+            data = _maybe_zstd(data)  # v3 media blobs are zstd-compressed
             try:
                 (dest / basename).write_bytes(data)
                 media_count += 1
@@ -297,12 +413,22 @@ class handler(BaseHTTPRequestHandler):
                     except sqlite3.DatabaseError as exc:
                         traceback.print_exc()
                         return self._send_json_error(
-                            400, f"could not read the Anki collection database: {exc}"
+                            400,
+                            "could not read the Anki collection database inside "
+                            "this .apkg — re-exporting from Anki with "
+                            "\u201CSupport older Anki versions\u201D checked "
+                            "usually fixes it. "
+                            f"(details: {exc})",
                         )
                     except Exception as exc:
                         traceback.print_exc()
                         return self._send_json_error(
-                            400, f"could not parse Anki bundle: {type(exc).__name__}: {exc}"
+                            400,
+                            "could not parse this Anki bundle. Try re-exporting "
+                            "from Anki as \u201CNotes in Plain Text (.txt)\u201D, "
+                            "or tick \u201CSupport older Anki versions\u201D when "
+                            "exporting the .apkg. "
+                            f"(details: {type(exc).__name__}: {exc})",
                         )
                     if not text.strip():
                         return self._send_json_error(
