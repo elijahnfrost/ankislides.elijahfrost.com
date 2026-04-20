@@ -96,22 +96,36 @@
     .drop:focus-within { outline: none; }
     label.section, label.drop { outline: none; }
 
-    .file-info {
+    .file-list {
       display: none;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      flex-direction: column;
+      gap: 8px;
       margin-top: 12px;
-      padding: 12px 14px;
+    }
+    .file-list.visible { display: flex; }
+    .file-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
       border: 1px solid var(--border);
       border-radius: 10px;
       background: rgba(255, 255, 255, 0.02);
       font-size: 14px;
     }
-    .file-info.visible { display: flex; }
-    .file-info .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .file-info .meta { color: var(--muted); font-size: 12px; }
-    .file-info button {
+    .file-row .info { min-width: 0; }
+    .file-row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-row .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .file-row .state {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .file-row[data-state="done"] .state { color: var(--success); }
+    .file-row[data-state="error"] .state { color: var(--danger); }
+    .file-row[data-state="converting"] .state { color: var(--accent); }
+    .file-row button.remove {
       background: transparent;
       border: 1px solid var(--border);
       color: var(--muted);
@@ -120,7 +134,26 @@
       cursor: pointer;
       font-size: 12px;
     }
-    .file-info button:hover { color: var(--text); border-color: var(--accent); }
+    .file-row button.remove:hover { color: var(--text); border-color: var(--accent); }
+    .file-list .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 0 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .file-list .toolbar button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .file-list .toolbar button:hover { color: var(--text); border-color: var(--accent); }
 
     .formats {
       display: grid;
@@ -320,21 +353,15 @@
     <div class="layout">
     <form id="form" class="card" autocomplete="off">
       <label class="section" for="file-input">1. Upload your export</label>
-      <input id="file-input" class="sr-only-input" type="file" accept=".txt,.zip,.apkg,.colpkg,text/plain,application/zip,application/octet-stream" />
+      <input id="file-input" class="sr-only-input" type="file" multiple accept=".txt,.zip,.apkg,.colpkg,text/plain,application/zip,application/octet-stream" />
       <label id="drop" class="drop" for="file-input">
-        <div><strong>Click to choose</strong> or drag a file here</div>
+        <div><strong>Click to choose</strong> or drag files here</div>
         <div class="hint">
-          <code>.apkg</code> · <code>.colpkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB
+          <code>.apkg</code> · <code>.colpkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB each · multi-file OK
         </div>
       </label>
 
-      <div id="file-info" class="file-info">
-        <div>
-          <div class="name" id="file-name"></div>
-          <div class="meta" id="file-meta"></div>
-        </div>
-        <button type="button" id="file-clear" aria-label="Remove file">remove</button>
-      </div>
+      <div id="file-list" class="file-list" aria-live="polite"></div>
 
       <label class="section" style="margin-top: 22px;">2. Pick a format</label>
       <div class="formats" role="radiogroup" aria-label="Output format">
@@ -355,7 +382,7 @@
         </label>
       </div>
 
-      <button type="submit" class="primary" id="submit" disabled>Convert & download</button>
+      <button type="submit" class="primary" id="submit" disabled>Convert &amp; download</button>
       <div id="status" class="status" role="status" aria-live="polite"></div>
 
       <details class="help">
@@ -478,16 +505,16 @@
   <script>
     const fileInput = document.getElementById("file-input");
     const drop = document.getElementById("drop");
-    const fileInfo = document.getElementById("file-info");
-    const fileName = document.getElementById("file-name");
-    const fileMeta = document.getElementById("file-meta");
-    const fileClear = document.getElementById("file-clear");
+    const fileList = document.getElementById("file-list");
     const submit = document.getElementById("submit");
     const status = document.getElementById("status");
     const form = document.getElementById("form");
     const fmtLabels = document.querySelectorAll(".fmt");
 
-    let currentFile = null;
+    // Each entry: { id, file, state: "pending"|"converting"|"done"|"error", message }
+    const entries = [];
+    let nextId = 1;
+    let converting = false;
 
     function formatBytes(n) {
       if (n < 1024) return n + " B";
@@ -495,24 +522,13 @@
       return (n / (1024 * 1024)).toFixed(2) + " MB";
     }
 
-    function setFile(file) {
-      if (!file) {
-        currentFile = null;
-        fileName.textContent = "";
-        fileMeta.textContent = "";
-        fileInfo.classList.remove("visible");
-        submit.disabled = true;
-        return;
-      }
-      currentFile = file;
-      fileName.textContent = file.name;
-      const niceType = file.type && file.type !== "application/octet-stream"
-        ? file.type
-        : (file.name.match(/\.[^.]+$/) || ["file"])[0].replace(".", "").toLowerCase();
-      fileMeta.textContent = formatBytes(file.size) + " · " + niceType;
-      fileInfo.classList.add("visible");
-      submit.disabled = false;
-      setStatus("");
+    function niceType(file) {
+      if (file.type && file.type !== "application/octet-stream") return file.type;
+      return (file.name.match(/\.[^.]+$/) || ["file"])[0].replace(".", "").toLowerCase();
+    }
+
+    function entryKey(file) {
+      return file.name + "|" + file.size + "|" + file.lastModified;
     }
 
     function setStatus(msg, kind) {
@@ -520,14 +536,112 @@
       status.innerHTML = msg || "";
     }
 
-    fileInput.addEventListener("change", (e) => {
-      const f = e.target.files[0];
-      if (f) setFile(f);
-    });
+    function addFiles(fileListObj) {
+      const seen = new Set(entries.map((e) => entryKey(e.file)));
+      let added = 0;
+      for (const file of Array.from(fileListObj || [])) {
+        if (seen.has(entryKey(file))) continue;
+        seen.add(entryKey(file));
+        entries.push({ id: nextId++, file, state: "pending", message: "" });
+        added += 1;
+      }
+      if (added > 0) setStatus("");
+      renderList();
+    }
 
-    fileClear.addEventListener("click", () => {
+    function removeEntry(id) {
+      if (converting) return;
+      const idx = entries.findIndex((e) => e.id === id);
+      if (idx >= 0) entries.splice(idx, 1);
+      renderList();
+    }
+
+    function clearAll() {
+      if (converting) return;
+      entries.length = 0;
       fileInput.value = "";
-      setFile(null);
+      renderList();
+      setStatus("");
+    }
+
+    function stateLabel(e) {
+      switch (e.state) {
+        case "pending": return "queued";
+        case "converting": return "converting…";
+        case "done": return e.message || "done";
+        case "error": return "failed — " + (e.message || "unknown");
+        default: return "";
+      }
+    }
+
+    function renderList() {
+      fileList.innerHTML = "";
+      if (entries.length === 0) {
+        fileList.classList.remove("visible");
+        submit.disabled = true;
+        submit.textContent = "Convert & download";
+        return;
+      }
+      fileList.classList.add("visible");
+      submit.disabled = converting;
+      submit.textContent = entries.length === 1
+        ? "Convert & download"
+        : "Convert & download " + entries.length + " files";
+
+      for (const e of entries) {
+        const row = document.createElement("div");
+        row.className = "file-row";
+        row.dataset.state = e.state;
+
+        const info = document.createElement("div");
+        info.className = "info";
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = e.file.name;
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = formatBytes(e.file.size) + " · " + niceType(e.file);
+        info.appendChild(name);
+        info.appendChild(meta);
+
+        const state = document.createElement("div");
+        state.className = "state";
+        state.textContent = stateLabel(e);
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "remove";
+        remove.textContent = "remove";
+        remove.setAttribute("aria-label", "Remove " + e.file.name);
+        remove.disabled = converting;
+        remove.addEventListener("click", () => removeEntry(e.id));
+
+        row.appendChild(info);
+        row.appendChild(state);
+        row.appendChild(remove);
+        fileList.appendChild(row);
+      }
+
+      const toolbar = document.createElement("div");
+      toolbar.className = "toolbar";
+      const summary = document.createElement("span");
+      const total = entries.reduce((s, e) => s + e.file.size, 0);
+      summary.textContent = entries.length + " file"
+        + (entries.length === 1 ? "" : "s") + " · " + formatBytes(total);
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.textContent = "clear all";
+      clear.disabled = converting;
+      clear.addEventListener("click", clearAll);
+      toolbar.appendChild(summary);
+      toolbar.appendChild(clear);
+      fileList.appendChild(toolbar);
+    }
+
+    fileInput.addEventListener("change", (e) => {
+      addFiles(e.target.files);
+      // Let the same file be reselected later if the user removes it.
+      fileInput.value = "";
     });
 
     ["dragenter", "dragover"].forEach((ev) => {
@@ -545,8 +659,7 @@
       });
     });
     drop.addEventListener("drop", (e) => {
-      const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) setFile(f);
+      addFiles(e.dataTransfer && e.dataTransfer.files);
     });
 
     fmtLabels.forEach((lbl) => {
@@ -556,66 +669,115 @@
       });
     });
 
+    async function convertOne(entry, fmt) {
+      const file = entry.file;
+      const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+      const isBinary = ext === ".zip" || ext === ".apkg" || ext === ".colpkg"
+        || /zip/i.test(file.type || "");
+      const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
+      const url = "/api/convert?format=" + encodeURIComponent(fmt)
+        + "&filename=" + encodeURIComponent(file.name);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+
+      if (!res.ok) {
+        let msg = "Conversion failed (" + res.status + ")";
+        try {
+          const j = await res.json();
+          if (j && j.error) msg = j.error;
+        } catch (_) {}
+        throw new Error(msg);
+      }
+
+      const slideCount = res.headers.get("X-Slide-Count");
+      const mediaCount = parseInt(res.headers.get("X-Media-Count") || "0", 10);
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const downloadName = match ? match[1]
+        : (file.name.replace(/\.[^.]+$/, "") + "." + (fmt === "png" ? "zip" : fmt));
+
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = downloadName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+      const mediaBlurb = mediaCount > 0
+        ? " · " + mediaCount + " image" + (mediaCount === 1 ? "" : "s")
+        : "";
+      return (slideCount || "?") + " slides" + mediaBlurb;
+    }
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (!currentFile) return;
+      if (converting || entries.length === 0) return;
       const fmt = document.querySelector('input[name="format"]:checked').value;
 
+      // Reset per-file state so re-submits don't keep stale icons.
+      for (const entry of entries) {
+        entry.state = "pending";
+        entry.message = "";
+      }
+      converting = true;
       submit.disabled = true;
-      setStatus('<span class="spinner"></span>Converting…');
+      renderList();
 
-      try {
-        const ext = (currentFile.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
-        const isBinary = ext === ".zip" || ext === ".apkg" || ext === ".colpkg"
-          || /zip/i.test(currentFile.type || "");
-        const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
-        const url = "/api/convert?format=" + encodeURIComponent(fmt)
-          + "&filename=" + encodeURIComponent(currentFile.name);
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": contentType },
-          body: currentFile,
-        });
-
-        if (!res.ok) {
-          let msg = "Conversion failed (" + res.status + ")";
-          try {
-            const j = await res.json();
-            if (j && j.error) msg = j.error;
-          } catch (_) {}
-          setStatus(msg, "error");
-          submit.disabled = false;
-          return;
-        }
-
-        const slideCount = res.headers.get("X-Slide-Count");
-        const mediaCount = parseInt(res.headers.get("X-Media-Count") || "0", 10);
-        const blob = await res.blob();
-        const disposition = res.headers.get("Content-Disposition") || "";
-        const match = /filename="([^"]+)"/.exec(disposition);
-        const downloadName = match ? match[1] : (currentFile.name.replace(/\.[^.]+$/, "") + "." + (fmt === "png" ? "zip" : fmt));
-
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = downloadName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-
-        const mediaBlurb = mediaCount > 0
-          ? " (" + mediaCount + " image" + (mediaCount === 1 ? "" : "s") + " embedded)"
-          : "";
+      let done = 0;
+      let failed = 0;
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        entry.state = "converting";
+        renderList();
         setStatus(
-          "Done — " + (slideCount || "?") + " slides downloaded as " + downloadName + mediaBlurb,
+          '<span class="spinner"></span>Converting ' + (i + 1) + " of "
+          + entries.length + " — " + entry.file.name + "…"
+        );
+        try {
+          const summary = await convertOne(entry, fmt);
+          entry.state = "done";
+          entry.message = summary;
+          done += 1;
+        } catch (err) {
+          entry.state = "error";
+          entry.message = err && err.message ? err.message : String(err);
+          failed += 1;
+        }
+        renderList();
+        // Small pause so browsers are willing to fire successive downloads.
+        if (i + 1 < entries.length) await new Promise((r) => setTimeout(r, 250));
+      }
+
+      converting = false;
+      submit.disabled = entries.length === 0;
+      renderList();
+
+      if (failed === 0) {
+        setStatus(
+          "Done — " + done + " file" + (done === 1 ? "" : "s") + " converted",
           "success"
         );
-      } catch (err) {
-        setStatus("Network error: " + (err && err.message ? err.message : err), "error");
-      } finally {
-        submit.disabled = false;
+      } else if (done === 0) {
+        setStatus(
+          "All " + failed + " file" + (failed === 1 ? "" : "s")
+          + " failed — see details above",
+          "error"
+        );
+      } else {
+        setStatus(
+          done + " of " + (done + failed) + " converted — "
+          + failed + " failed, see details above",
+          "error"
+        );
       }
     });
+
+    renderList();
   </script>
 </body>
 </html>

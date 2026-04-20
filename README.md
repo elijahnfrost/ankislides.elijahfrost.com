@@ -6,7 +6,7 @@ Front and back of each card become separate slides, in order (`front1, back1, fr
 
 There are two ways to use it:
 
-- **Web app** (this repo, deployed on Vercel) — drop any supported Anki export, pick a format, download the deck. Nothing is stored on the server.
+- **Web app** (this repo, deployed on Vercel) — drop any number of supported Anki exports at once, pick a format, and each is converted and downloaded individually. Nothing is stored on the server.
 - **CLI** (`anki_to_slides.py`) — runs locally from `.txt` + local media folder.
 
 ## Web app
@@ -16,7 +16,7 @@ The web app lives in:
 - `index.html` — the frontend (vanilla HTML/CSS/JS, no build step).
 - `api/convert.py` — a Vercel Python function that renders the deck in memory and streams it back.
 
-Uploads are capped at 10 MB, never written to disk, and the function's working directory is read-only anyway.
+Uploads are capped at 50 MB per file (no limit on how many files you drop at once), never written to disk beyond a per-request temp directory that's deleted before the response returns.
 
 ### Which Anki export to use
 
