@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Anki → Slides</title>
+  <meta name="description" content="Convert an Anki plain-text card export into a 16:9 PDF, PowerPoint, or PNG slide deck. All conversion happens on the fly — nothing is stored." />
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234f46e5'/><text x='16' y='22' text-anchor='middle' font-family='system-ui' font-weight='700' font-size='16' fill='white'>A</text></svg>" />
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121a33;
+      --panel-2: #1a2446;
+      --border: #2a3560;
+      --text: #e8ecf8;
+      --muted: #9aa3c7;
+      --accent: #7c8cff;
+      --accent-2: #4f46e5;
+      --danger: #ff6b6b;
+      --success: #3ecf8e;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: radial-gradient(1200px 600px at 20% -10%, #1c2453 0%, transparent 60%),
+                  radial-gradient(900px 500px at 110% 10%, #2b1c4f 0%, transparent 55%),
+                  var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 96px;
+    }
+    header { margin-bottom: 32px; }
+    h1 {
+      font-size: 34px;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+      font-weight: 700;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .card {
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+    label.section {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .drop {
+      border: 1.5px dashed var(--border);
+      border-radius: 12px;
+      padding: 28px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease;
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .drop:hover, .drop.hover {
+      border-color: var(--accent);
+      background: rgba(124, 140, 255, 0.06);
+    }
+    .drop strong { color: var(--text); }
+    .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .drop input[type="file"] { display: none; }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.02);
+      font-size: 14px;
+    }
+    .file-info .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-info .meta { color: var(--muted); font-size: 12px; }
+    .file-info button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .file-info button:hover { color: var(--text); border-color: var(--accent); }
+
+    .formats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 22px;
+    }
+    .fmt {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 10px;
+      text-align: center;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.02);
+      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+    }
+    .fmt:hover { border-color: var(--accent); }
+    .fmt.active {
+      border-color: var(--accent);
+      background: rgba(124, 140, 255, 0.12);
+    }
+    .fmt .title { font-weight: 600; font-size: 14px; }
+    .fmt .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .fmt input { display: none; }
+
+    button.primary {
+      margin-top: 22px;
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 0;
+      font-weight: 600;
+      font-size: 15px;
+      color: white;
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+      cursor: pointer;
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+    button.primary:hover { opacity: 0.95; }
+    button.primary:active { transform: translateY(1px); }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--muted);
+      min-height: 18px;
+    }
+    .status.error { color: var(--danger); }
+    .status.success { color: var(--success); }
+
+    footer {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    details.help {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    details.help summary { cursor: pointer; color: var(--text); font-weight: 500; }
+    details.help ol { padding-left: 18px; }
+    details.help code {
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      margin-right: 8px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: var(--text);
+      border-radius: 50%;
+      animation: spin 700ms linear infinite;
+      vertical-align: -2px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Anki → Slides</h1>
+      <p>Drop an Anki plain-text export and download a 16:9 slide deck. Front and back become separate slides, in order. Nothing is stored — files are converted on the fly.</p>
+    </header>
+
+    <form id="form" class="card" autocomplete="off">
+      <label class="section" for="file-input">1. Upload .txt export</label>
+      <label id="drop" class="drop" for="file-input">
+        <div><strong>Click to choose</strong> or drag a file here</div>
+        <div class="hint">Tab-separated: front &lt;TAB&gt; back · UTF-8 · max 10 MB</div>
+        <input id="file-input" type="file" accept=".txt,text/plain" />
+      </label>
+
+      <div id="file-info" class="file-info" hidden>
+        <div>
+          <div class="name" id="file-name">—</div>
+          <div class="meta" id="file-meta">—</div>
+        </div>
+        <button type="button" id="file-clear" aria-label="Remove file">remove</button>
+      </div>
+
+      <label class="section" style="margin-top: 22px;">2. Pick a format</label>
+      <div class="formats" role="radiogroup" aria-label="Output format">
+        <label class="fmt active">
+          <input type="radio" name="format" value="pdf" checked />
+          <div class="title">PDF</div>
+          <div class="sub">single file</div>
+        </label>
+        <label class="fmt">
+          <input type="radio" name="format" value="pptx" />
+          <div class="title">PowerPoint</div>
+          <div class="sub">.pptx</div>
+        </label>
+        <label class="fmt">
+          <input type="radio" name="format" value="png" />
+          <div class="title">PNG</div>
+          <div class="sub">.zip of images</div>
+        </label>
+      </div>
+
+      <button type="submit" class="primary" id="submit" disabled>Convert & download</button>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+
+      <details class="help">
+        <summary>How do I export from Anki?</summary>
+        <ol>
+          <li>In Anki desktop: <code>File → Export…</code></li>
+          <li>Export format: <strong>Notes in Plain Text (.txt)</strong></li>
+          <li>Pick a deck, uncheck “Include HTML” if you want cleaner text, and save.</li>
+          <li>Upload that <code>.txt</code> file here. Image references are skipped on the web — for embedded images, use the CLI locally.</li>
+        </ol>
+      </details>
+    </form>
+
+    <footer>
+      Runs entirely on a serverless function · no uploads are persisted
+    </footer>
+  </main>
+
+  <script>
+    const fileInput = document.getElementById("file-input");
+    const drop = document.getElementById("drop");
+    const fileInfo = document.getElementById("file-info");
+    const fileName = document.getElementById("file-name");
+    const fileMeta = document.getElementById("file-meta");
+    const fileClear = document.getElementById("file-clear");
+    const submit = document.getElementById("submit");
+    const status = document.getElementById("status");
+    const form = document.getElementById("form");
+    const fmtLabels = document.querySelectorAll(".fmt");
+
+    let currentFile = null;
+
+    function formatBytes(n) {
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / (1024 * 1024)).toFixed(2) + " MB";
+    }
+
+    function setFile(file) {
+      if (!file) {
+        currentFile = null;
+        fileInfo.hidden = true;
+        submit.disabled = true;
+        return;
+      }
+      currentFile = file;
+      fileName.textContent = file.name;
+      fileMeta.textContent = formatBytes(file.size) + " · " + (file.type || "text/plain");
+      fileInfo.hidden = false;
+      submit.disabled = false;
+      setStatus("");
+    }
+
+    function setStatus(msg, kind) {
+      status.className = "status" + (kind ? " " + kind : "");
+      status.innerHTML = msg || "";
+    }
+
+    fileInput.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (f) setFile(f);
+    });
+
+    fileClear.addEventListener("click", () => {
+      fileInput.value = "";
+      setFile(null);
+    });
+
+    ["dragenter", "dragover"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.add("hover");
+      });
+    });
+    ["dragleave", "drop"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.remove("hover");
+      });
+    });
+    drop.addEventListener("drop", (e) => {
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) setFile(f);
+    });
+
+    fmtLabels.forEach((lbl) => {
+      lbl.addEventListener("click", () => {
+        fmtLabels.forEach((l) => l.classList.remove("active"));
+        lbl.classList.add("active");
+      });
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentFile) return;
+      const fmt = document.querySelector('input[name="format"]:checked').value;
+
+      submit.disabled = true;
+      setStatus('<span class="spinner"></span>Converting…');
+
+      try {
+        const url = "/api/convert?format=" + encodeURIComponent(fmt)
+          + "&filename=" + encodeURIComponent(currentFile.name);
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+          body: currentFile,
+        });
+
+        if (!res.ok) {
+          let msg = "Conversion failed (" + res.status + ")";
+          try {
+            const j = await res.json();
+            if (j && j.error) msg = j.error;
+          } catch (_) {}
+          setStatus(msg, "error");
+          submit.disabled = false;
+          return;
+        }
+
+        const slideCount = res.headers.get("X-Slide-Count");
+        const blob = await res.blob();
+        const disposition = res.headers.get("Content-Disposition") || "";
+        const match = /filename="([^"]+)"/.exec(disposition);
+        const downloadName = match ? match[1] : (currentFile.name.replace(/\.[^.]+$/, "") + "." + (fmt === "png" ? "zip" : fmt));
+
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = downloadName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+        setStatus("Done — " + (slideCount || "?") + " slides downloaded as " + downloadName, "success");
+      } catch (err) {
+        setStatus("Network error: " + (err && err.message ? err.message : err), "error");
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
