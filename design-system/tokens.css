@@ -1,0 +1,196 @@
+/**
+ * Design tokens and base styles for the Elijah Frost visual language.
+ *
+ * Usage in a Next.js + Tailwind v4 app: in `app/globals.css`, keep the Tailwind
+ * import and `@theme` block first, then paste or `@import` this file’s contents
+ * below them. See README.md in this folder.
+ *
+ * Sync source: `app/globals.css` in the elijahfrost.com repo (custom cursor rules
+ * are optional and live only on the main site).
+ */
+
+/* Shared theme switch timing — nav chrome uses the same tokens; linear keeps all paints in phase */
+:root {
+  --theme-transition-duration: 120ms;
+  --theme-transition-ease: linear;
+  color-scheme: dark;
+  --color-bg-page: #0d0d0d;
+  --color-fg: #e4dfd8;
+  --color-fg-bright: #ffffff;
+  --color-fg-muted: #6b6660;
+  --color-fg-dim: #4a4643;
+  --color-fg-soft: #8a8580;
+  --color-fg-body: #7a7670;
+  --color-label: #3a3733;
+  --color-border: #2a2a2a;
+  --color-border-hover: #444444;
+  --color-border-section: #1e1e1e;
+  --color-border-divider: #1a1a1a;
+  --color-numeral: #2e2c2a;
+  --color-bullet: #3a3733;
+  --color-border-input-error: #3a322f;
+  --color-border-input-error-focus: #4a3f3a;
+  --color-border-input-focus: #2e2e2e;
+  --color-chrome-border: rgba(34, 34, 34, 0.42);
+  --color-hero-grid: #e4dfd8;
+  --color-footer-year: #2a2a2a;
+  --color-error-text: #5a4a4a;
+  /* Text selection: soft mix of fg + page (readable but quieter than a flat gray block) */
+  --color-selection-bg: color-mix(in srgb, var(--color-fg) 16%, var(--color-bg-page));
+  --color-selection-fg: var(--color-fg);
+  /* Custom cursor (optional): same as body text; stroke uses page bg where used */
+  --cursor-fill: var(--color-fg);
+  --cursor-stroke: var(--color-bg-page);
+  --cursor-arrow-fill: var(--color-fg);
+  /* Touch (iOS Safari): subtle flash aligned with dark palette */
+  --color-tap-highlight: rgba(228, 223, 216, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --theme-transition-duration: 0ms;
+  }
+}
+
+html.light {
+  color-scheme: light;
+  --color-bg-page: #faf8f5;
+  --color-fg: #1c1917;
+  --color-fg-bright: #0c0a09;
+  --color-fg-muted: #5c5750;
+  --color-fg-dim: #6b6560;
+  --color-fg-soft: #7a7570;
+  --color-fg-body: #5e5950;
+  --color-label: #8a8580;
+  --color-border: #d4cfc5;
+  --color-border-hover: #a8a29a;
+  --color-border-section: #e0dcd5;
+  --color-border-divider: #d9d4cc;
+  --color-numeral: #c4bfb6;
+  --color-bullet: #8a8580;
+  --color-border-input-error: #c4a89a;
+  --color-border-input-error-focus: #b89888;
+  --color-border-input-focus: #a8a29a;
+  --color-chrome-border: rgba(120, 113, 103, 0.35);
+  --color-hero-grid: #1c1917;
+  --color-footer-year: #c4bfb6;
+  --color-error-text: #8a6a6a;
+  --color-selection-bg: color-mix(in srgb, var(--color-fg) 9%, var(--color-bg-page));
+  --color-selection-fg: var(--color-fg);
+  --color-tap-highlight: rgba(28, 25, 23, 0.08);
+}
+
+/* Mobile Safari: default blue flash → same language as selection (subtle, theme-aware) */
+html {
+  -webkit-tap-highlight-color: var(--color-tap-highlight);
+}
+
+/* Custom cursor: hide system pointer when your app enables it (e.g. set `data-cursor-custom` on `<html>`). Optional — skip if you use the default OS cursor. See STYLE_GUIDE.md. */
+html[data-cursor-custom],
+html[data-cursor-custom] * {
+  cursor: none !important;
+}
+
+[data-cursor-root] {
+  cursor: none !important;
+}
+
+body {
+  background: var(--color-bg-page);
+  color: var(--color-fg);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  /* Slightly denser copy on small screens; scales up at sm+ */
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+::selection {
+  background-color: var(--color-selection-bg);
+  color: var(--color-selection-fg);
+}
+
+::-moz-selection {
+  background-color: var(--color-selection-bg);
+  color: var(--color-selection-fg);
+}
+
+/*
+ * One rule for body + all descendants: same duration, delay, and linear easing.
+ * Gradients that use currentColor follow the same color transition as text.
+ */
+body,
+body * {
+  transition-property: background-color, color, border-color, outline-color, fill, stroke;
+  transition-duration: var(--theme-transition-duration);
+  transition-timing-function: var(--theme-transition-ease);
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body,
+  body * {
+    transition-duration: 0ms;
+  }
+}
+
+/* Theme toggle: snap SVG strokes (stroke tween felt jittery); color still uses rule above */
+[data-theme-toggle] svg {
+  transition: none;
+}
+
+@media (min-width: 640px) {
+  body {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+}
+
+section[id] {
+  /* Matches fixed nav: h-14 mobile + safe area, 72px sm+ */
+  scroll-margin-top: calc(3.5rem + env(safe-area-inset-top, 0px));
+}
+
+@media (min-width: 640px) {
+  section[id] {
+    scroll-margin-top: calc(4.5rem + env(safe-area-inset-top, 0px));
+  }
+}
+
+/* Same motion language as primary UI (cubic-bezier(0.16, 1, 0.3, 1)) — short, smooth */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-up {
+  animation: fadeUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.fade-in-up.delay-1 {
+  animation-delay: 0ms;
+}
+
+.fade-in-up.delay-2 {
+  animation-delay: 40ms;
+}
+
+.fade-in-up.delay-3 {
+  animation-delay: 80ms;
+}
+
+.fade-in-up.delay-4 {
+  animation-delay: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in-up {
+    animation: none;
+    opacity: 1;
+  }
+}

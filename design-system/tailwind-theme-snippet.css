@@ -1,0 +1,15 @@
+/**
+ * Tailwind CSS v4 `@theme` mapping for font families.
+ *
+ * Place this in `app/globals.css` immediately after `@import "tailwindcss";`
+ * (same file order as the reference site).
+ *
+ * You must define the CSS variables `--font-inter` and `--font-cormorant` on
+ * `<html>` — typically via `next/font/google` in `app/layout.tsx`. See README.md.
+ */
+
+@theme inline {
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-cormorant);
+  --font-display: var(--font-cormorant);
+}

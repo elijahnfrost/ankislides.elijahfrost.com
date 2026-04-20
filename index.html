@@ -5,273 +5,648 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Anki → Slides</title>
   <meta name="description" content="Convert an Anki plain-text card export into a 16:9 PDF, PowerPoint, or PNG slide deck. All conversion happens on the fly — nothing is stored." />
-  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234f46e5'/><text x='16' y='22' text-anchor='middle' font-family='system-ui' font-weight='700' font-size='16' fill='white'>A</text></svg>" />
+  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#faf8f5" media="(prefers-color-scheme: light)" />
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='none' stroke='%23e4dfd8' stroke-width='1.5'/><text x='16' y='21' text-anchor='middle' font-family='Cormorant Garamond, serif' font-weight='300' font-size='18' fill='%23e4dfd8'>A</text></svg>" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&display=swap" />
+
+  <script>
+    // Theme boot: read saved preference (falls back to system) and set `html.light`
+    // BEFORE the stylesheet paints, so we never flash the wrong palette.
+    (function () {
+      try {
+        var saved = localStorage.getItem("theme");
+        var prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+        var useLight = saved ? saved === "light" : prefersLight;
+        if (useLight) document.documentElement.classList.add("light");
+      } catch (_) {}
+    })();
+  </script>
+
   <style>
+    /* ----------------------------------------------------------------------
+     * Design system tokens — synced from design-system/tokens.css.
+     * Dark-first; `html.light` overrides the same token names. Prefer these
+     * variables over raw hex anywhere that must track the theme.
+     * -------------------------------------------------------------------- */
     :root {
-      --bg: #0b1020;
-      --panel: #121a33;
-      --panel-2: #1a2446;
-      --border: #2a3560;
-      --text: #e8ecf8;
-      --muted: #9aa3c7;
-      --accent: #7c8cff;
-      --accent-2: #4f46e5;
-      --danger: #ff6b6b;
-      --success: #3ecf8e;
+      --theme-transition-duration: 120ms;
+      --theme-transition-ease: linear;
+      color-scheme: dark;
+      --color-bg-page: #0d0d0d;
+      --color-fg: #e4dfd8;
+      --color-fg-bright: #ffffff;
+      --color-fg-muted: #6b6660;
+      --color-fg-dim: #4a4643;
+      --color-fg-soft: #8a8580;
+      --color-fg-body: #7a7670;
+      --color-label: #3a3733;
+      --color-border: #2a2a2a;
+      --color-border-hover: #444444;
+      --color-border-section: #1e1e1e;
+      --color-border-divider: #1a1a1a;
+      --color-numeral: #2e2c2a;
+      --color-bullet: #3a3733;
+      --color-border-input-error: #3a322f;
+      --color-border-input-error-focus: #4a3f3a;
+      --color-border-input-focus: #2e2e2e;
+      --color-chrome-border: rgba(34, 34, 34, 0.42);
+      --color-hero-grid: #e4dfd8;
+      --color-footer-year: #2a2a2a;
+      --color-error-text: #5a4a4a;
+      --color-selection-bg: color-mix(in srgb, var(--color-fg) 16%, var(--color-bg-page));
+      --color-selection-fg: var(--color-fg);
+      --color-tap-highlight: rgba(228, 223, 216, 0.12);
+      --color-success-text: #8a9684;
+
+      --font-inter: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-cormorant: "Cormorant Garamond", "Times New Roman", serif;
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      :root { --theme-transition-duration: 0ms; }
+    }
+
+    html.light {
+      color-scheme: light;
+      --color-bg-page: #faf8f5;
+      --color-fg: #1c1917;
+      --color-fg-bright: #0c0a09;
+      --color-fg-muted: #5c5750;
+      --color-fg-dim: #6b6560;
+      --color-fg-soft: #7a7570;
+      --color-fg-body: #5e5950;
+      --color-label: #8a8580;
+      --color-border: #d4cfc5;
+      --color-border-hover: #a8a29a;
+      --color-border-section: #e0dcd5;
+      --color-border-divider: #d9d4cc;
+      --color-numeral: #c4bfb6;
+      --color-bullet: #8a8580;
+      --color-border-input-error: #c4a89a;
+      --color-border-input-error-focus: #b89888;
+      --color-border-input-focus: #a8a29a;
+      --color-chrome-border: rgba(120, 113, 103, 0.35);
+      --color-hero-grid: #1c1917;
+      --color-footer-year: #c4bfb6;
+      --color-error-text: #8a6a6a;
+      --color-selection-bg: color-mix(in srgb, var(--color-fg) 9%, var(--color-bg-page));
+      --color-selection-fg: var(--color-fg);
+      --color-tap-highlight: rgba(28, 25, 23, 0.08);
+      --color-success-text: #5d6f55;
+    }
+
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
+
+    html {
+      -webkit-tap-highlight-color: var(--color-tap-highlight);
+    }
+
     html, body {
       margin: 0;
       padding: 0;
-      background: radial-gradient(1200px 600px at 20% -10%, #1c2453 0%, transparent 60%),
-                  radial-gradient(900px 500px at 110% 10%, #2b1c4f 0%, transparent 55%),
-                  var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
     }
+
+    body {
+      background: var(--color-bg-page);
+      color: var(--color-fg);
+      font-family: var(--font-inter);
+      font-size: 0.9375rem;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      min-height: 100vh;
+    }
+
+    ::selection { background-color: var(--color-selection-bg); color: var(--color-selection-fg); }
+    ::-moz-selection { background-color: var(--color-selection-bg); color: var(--color-selection-fg); }
+
+    /* One transition language for every theme-driven color change. */
+    body, body * {
+      transition-property: background-color, color, border-color, outline-color, fill, stroke;
+      transition-duration: var(--theme-transition-duration);
+      transition-timing-function: var(--theme-transition-ease);
+      transition-delay: 0s;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body, body * { transition-duration: 0ms; }
+    }
+    [data-theme-toggle] svg { transition: none; }
+
+    @media (min-width: 640px) {
+      body { font-size: 1rem; line-height: 1.5; }
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in-up { animation: fadeUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .fade-in-up.delay-1 { animation-delay: 0ms; }
+    .fade-in-up.delay-2 { animation-delay: 40ms; }
+    .fade-in-up.delay-3 { animation-delay: 80ms; }
+    .fade-in-up.delay-4 { animation-delay: 120ms; }
+    @media (prefers-reduced-motion: reduce) {
+      .fade-in-up { animation: none; opacity: 1; }
+    }
+
+    /* ----------------------------------------------------------------------
+     * Theme toggle — floats top-right; same edges/type language as other
+     * outline controls. No header chrome, so it sits directly on the page.
+     * -------------------------------------------------------------------- */
+    .theme-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 50;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-bg-page) 70%, transparent);
+      backdrop-filter: saturate(140%) blur(8px);
+      -webkit-backdrop-filter: saturate(140%) blur(8px);
+      color: var(--color-fg-soft);
+      cursor: pointer;
+      border-radius: 2px;
+    }
+    @media (min-width: 640px) {
+      .theme-toggle { top: 28px; right: 40px; }
+    }
+    .theme-toggle:hover { border-color: var(--color-border-hover); color: var(--color-fg); }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--color-fg-muted);
+      outline-offset: 2px;
+    }
+    .theme-toggle svg { width: 14px; height: 14px; display: block; }
+    html:not(.light) .theme-toggle .icon-moon { display: none; }
+    html.light .theme-toggle .icon-sun { display: none; }
+
+    /* ----------------------------------------------------------------------
+     * Page frame
+     * -------------------------------------------------------------------- */
     main {
       max-width: 1120px;
       margin: 0 auto;
-      padding: 56px 24px 96px;
+      padding: 72px 20px 80px;
     }
-    header { margin-bottom: 28px; }
+    @media (min-width: 640px) {
+      main { padding: 96px 40px 120px; }
+    }
+
+    /* ----- Hero ----- */
+    .hero {
+      padding: 24px 0 56px;
+      border-bottom: 1px solid var(--color-border-section);
+      margin-bottom: 56px;
+      position: relative;
+    }
+    @media (min-width: 640px) {
+      .hero { padding: 32px 0 72px; margin-bottom: 72px; }
+    }
+
+    .hero .eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+      margin-bottom: 28px;
+    }
+    .hero h1 {
+      font-family: var(--font-cormorant);
+      font-weight: 300;
+      letter-spacing: -0.01em;
+      line-height: 1.02;
+      font-size: clamp(54px, 10vw, 120px);
+      margin: 0 0 28px;
+      color: var(--color-fg);
+    }
+    .hero h1 em {
+      font-style: italic;
+      color: var(--color-fg-muted);
+      font-weight: 300;
+    }
+    .hero h1 .arrow {
+      display: inline-block;
+      font-family: var(--font-inter);
+      font-size: 0.5em;
+      font-weight: 300;
+      vertical-align: 0.22em;
+      color: var(--color-fg-dim);
+      margin: 0 0.18em;
+      letter-spacing: 0;
+    }
+    .hero .lede {
+      max-width: 56ch;
+      color: var(--color-fg-body);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+    @media (min-width: 640px) {
+      .hero .lede { font-size: 16px; }
+    }
+    .hero .meta {
+      margin-top: 28px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+    }
+    .hero .meta span::before {
+      content: "";
+      display: inline-block;
+      width: 18px;
+      border-top: 1px solid var(--color-border);
+      margin-right: 10px;
+      vertical-align: 3px;
+    }
+
+    /* ----- Two-column layout ----- */
     .layout {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 320px;
-      gap: 24px;
+      gap: 56px;
       align-items: start;
     }
-    @media (max-width: 860px) {
-      .layout { grid-template-columns: 1fr; }
-      .sidebar { position: static; }
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; gap: 48px; }
     }
-    h1 {
-      font-size: 34px;
-      letter-spacing: -0.02em;
-      margin: 0 0 8px;
-      font-weight: 700;
+
+    /* ----- Section heading (numbered) ----- */
+    .step {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 16px;
     }
-    header p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 15px;
-      line-height: 1.55;
+    .step .num {
+      font-family: var(--font-cormorant);
+      font-weight: 300;
+      font-style: italic;
+      font-size: 28px;
+      color: var(--color-numeral);
+      line-height: 1;
+      flex-shrink: 0;
     }
-    .card {
-      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 28px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-    }
-    label.section {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
+    .step .label {
+      font-size: 10px;
+      letter-spacing: 0.28em;
       text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 10px;
+      color: var(--color-fg-soft);
     }
+
+    /* ----- Drop zone ----- */
     .drop {
       display: block;
-      border: 1.5px dashed var(--border);
-      border-radius: 12px;
-      padding: 28px;
+      border: 1px solid var(--color-border-section);
+      background: transparent;
+      padding: 44px 24px;
       text-align: center;
       cursor: pointer;
-      transition: border-color 120ms ease, background 120ms ease;
-      background: rgba(255, 255, 255, 0.015);
+      transition: border-color 120ms linear, background-color 120ms linear;
     }
-    .drop:hover, .drop.hover {
-      border-color: var(--accent);
-      background: rgba(124, 140, 255, 0.06);
+    .drop:hover,
+    .drop.hover {
+      border-color: var(--color-border-hover);
+      background: color-mix(in srgb, var(--color-fg) 3%, transparent);
     }
-    .drop strong { color: var(--text); }
-    .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .drop .title {
+      font-family: var(--font-cormorant);
+      font-weight: 300;
+      font-size: 22px;
+      color: var(--color-fg);
+      margin-bottom: 6px;
+    }
+    .drop .title em { font-style: italic; color: var(--color-fg-muted); }
+    .drop .hint {
+      color: var(--color-fg-body);
+      font-size: 12px;
+      line-height: 1.65;
+      max-width: 48ch;
+      margin: 0 auto;
+    }
+    .drop .hint code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      padding: 1px 6px;
+      color: var(--color-fg);
+      background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+      border: 1px solid var(--color-border-divider);
+    }
     .sr-only-input { display: none !important; }
-    .drop:focus-within { outline: none; }
-    label.section, label.drop { outline: none; }
 
+    /* ----- File list ----- */
     .file-list {
       display: none;
       flex-direction: column;
-      gap: 8px;
       margin-top: 12px;
+      border: 1px solid var(--color-border-section);
+      border-top: 0;
     }
     .file-list.visible { display: flex; }
     .file-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto auto;
       align-items: center;
-      gap: 12px;
-      padding: 10px 14px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.02);
-      font-size: 14px;
+      gap: 16px;
+      padding: 14px 18px;
+      border-top: 1px solid var(--color-border-divider);
+      font-size: 13px;
     }
+    .file-row:first-child { border-top: 0; }
     .file-row .info { min-width: 0; }
-    .file-row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .file-row .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .file-row .name {
+      color: var(--color-fg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 400;
+    }
+    .file-row .meta {
+      color: var(--color-fg-dim);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
     .file-row .state {
-      font-size: 12px;
-      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-fg-muted);
       white-space: nowrap;
     }
-    .file-row[data-state="done"] .state { color: var(--success); }
-    .file-row[data-state="error"] .state { color: var(--danger); }
-    .file-row[data-state="converting"] .state { color: var(--accent); }
+    .file-row[data-state="done"] .state { color: var(--color-success-text); }
+    .file-row[data-state="error"] .state { color: var(--color-error-text); }
+    .file-row[data-state="converting"] .state { color: var(--color-fg); }
     .file-row button.remove {
       background: transparent;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      padding: 4px 10px;
-      border-radius: 6px;
+      border: 1px solid var(--color-border);
+      color: var(--color-fg-soft);
+      padding: 6px 12px;
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
       cursor: pointer;
-      font-size: 12px;
+      font-family: inherit;
+      transition: border-color 120ms linear, color 120ms linear;
     }
-    .file-row button.remove:hover { color: var(--text); border-color: var(--accent); }
+    .file-row button.remove:hover {
+      border-color: var(--color-border-hover);
+      color: var(--color-fg);
+    }
+    .file-row button.remove:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
     .file-list .toolbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 12px;
-      padding: 0 4px;
-      font-size: 12px;
-      color: var(--muted);
+      padding: 12px 18px;
+      border-top: 1px solid var(--color-border-divider);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
     }
     .file-list .toolbar button {
       background: transparent;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      padding: 4px 10px;
-      border-radius: 6px;
+      border: 1px solid var(--color-border);
+      color: var(--color-fg-soft);
+      padding: 5px 12px;
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
       cursor: pointer;
-      font-size: 12px;
+      font-family: inherit;
+      transition: border-color 120ms linear, color 120ms linear;
     }
-    .file-list .toolbar button:hover { color: var(--text); border-color: var(--accent); }
+    .file-list .toolbar button:hover:not(:disabled) {
+      border-color: var(--color-border-hover);
+      color: var(--color-fg);
+    }
+    .file-list .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    /* ----- Format selector ----- */
+    .formats-wrap { margin-top: 48px; }
     .formats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-top: 22px;
+      gap: 0;
+      border: 1px solid var(--color-border-section);
+      border-right: 0;
     }
     .fmt {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 10px;
-      text-align: center;
+      border-right: 1px solid var(--color-border-section);
+      padding: 20px 16px;
+      text-align: left;
       cursor: pointer;
-      background: rgba(255, 255, 255, 0.02);
-      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+      background: transparent;
+      transition: background-color 120ms linear, border-color 120ms linear;
+      position: relative;
     }
-    .fmt:hover { border-color: var(--accent); }
+    .fmt:hover { background: color-mix(in srgb, var(--color-fg) 2%, transparent); }
     .fmt.active {
-      border-color: var(--accent);
-      background: rgba(124, 140, 255, 0.12);
+      background: color-mix(in srgb, var(--color-fg) 4%, transparent);
     }
-    .fmt .title { font-weight: 600; font-size: 14px; }
-    .fmt .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .fmt.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -1px;
+      height: 1px;
+      background: var(--color-fg);
+    }
+    .fmt .fmt-label {
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+      margin-bottom: 10px;
+    }
+    .fmt .fmt-title {
+      font-family: var(--font-cormorant);
+      font-weight: 400;
+      font-size: 22px;
+      color: var(--color-fg);
+      line-height: 1.1;
+    }
+    .fmt.active .fmt-title { color: var(--color-fg-bright); }
+    .fmt .fmt-sub {
+      font-size: 11px;
+      color: var(--color-fg-body);
+      margin-top: 4px;
+    }
     .fmt input { display: none; }
 
+    /* ----- Submit button (outline recipe) ----- */
     button.primary {
-      margin-top: 22px;
+      margin-top: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
       width: 100%;
-      padding: 14px 16px;
-      border-radius: 10px;
-      border: 0;
-      font-weight: 600;
-      font-size: 15px;
-      color: white;
-      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+      min-height: 44px;
+      padding: 14px 28px;
+      border: 1px solid var(--color-border);
+      background: transparent;
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--color-fg-soft);
       cursor: pointer;
-      transition: opacity 120ms ease, transform 120ms ease;
+      transition: border-color 120ms linear, color 120ms linear;
     }
-    button.primary:hover { opacity: 0.95; }
-    button.primary:active { transform: translateY(1px); }
-    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary:hover:not(:disabled) {
+      border-color: var(--color-border-hover);
+      color: var(--color-fg);
+    }
+    button.primary:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    button.primary:focus-visible {
+      outline: 2px solid var(--color-fg-muted);
+      outline-offset: 2px;
+    }
+    button.primary .arrow {
+      font-size: 12px;
+      letter-spacing: 0;
+    }
 
     .status {
-      margin-top: 16px;
-      font-size: 13px;
-      color: var(--muted);
-      min-height: 18px;
+      margin-top: 18px;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-fg-muted);
+      min-height: 1.2em;
     }
-    .status.error { color: var(--danger); }
-    .status.success { color: var(--success); }
+    .status.error { color: var(--color-error-text); }
+    .status.success { color: var(--color-success-text); }
 
-    footer {
-      margin-top: 32px;
-      color: var(--muted);
-      font-size: 12px;
-      text-align: center;
-      line-height: 1.6;
-    }
-    footer a { color: var(--accent); text-decoration: none; }
-    footer a:hover { text-decoration: underline; }
-
+    /* ----- Help / details ----- */
     details.help {
-      margin-top: 14px;
-      color: var(--muted);
+      margin-top: 20px;
+      border-top: 1px solid var(--color-border-divider);
+      padding-top: 18px;
+      color: var(--color-fg-body);
       font-size: 13px;
-      line-height: 1.55;
+      line-height: 1.7;
     }
-    details.help + details.help { margin-top: 10px; }
     details.help summary {
       cursor: pointer;
-      color: var(--text);
-      font-weight: 500;
-      padding: 8px 0;
-      list-style-position: outside;
+      color: var(--color-fg-soft);
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: color 120ms linear;
     }
-    details.help[open] summary { margin-bottom: 6px; }
-    details.help ol, details.help ul { padding-left: 20px; margin: 4px 0 8px; }
-    details.help li { margin-bottom: 4px; }
+    details.help summary:hover { color: var(--color-fg); }
+    details.help summary::-webkit-details-marker { display: none; }
+    details.help summary::before {
+      content: "+";
+      font-family: var(--font-cormorant);
+      font-size: 20px;
+      line-height: 0;
+      color: var(--color-fg-dim);
+      transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+      display: inline-block;
+      width: 12px;
+    }
+    details.help[open] summary::before {
+      content: "−";
+    }
+    details.help[open] { padding-bottom: 6px; }
+    details.help[open] summary { margin-bottom: 14px; color: var(--color-fg); }
+    details.help p { margin: 8px 0; color: var(--color-fg-body); }
+    details.help ol, details.help ul { padding-left: 20px; margin: 8px 0; }
+    details.help li { margin-bottom: 6px; color: var(--color-fg-body); }
+    details.help strong { color: var(--color-fg); font-weight: 500; }
     details.help code {
-      background: rgba(255, 255, 255, 0.06);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
       padding: 1px 6px;
-      border-radius: 4px;
-      font-size: 12px;
+      color: var(--color-fg);
+      background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+      border: 1px solid var(--color-border-divider);
     }
-    details.help strong { color: var(--text); }
+
     table.compat {
       width: 100%;
       border-collapse: collapse;
-      margin: 6px 0 10px;
+      margin: 14px 0 6px;
       font-size: 12.5px;
     }
     table.compat th, table.compat td {
-      border-bottom: 1px solid var(--border);
-      padding: 7px 8px;
+      border-bottom: 1px solid var(--color-border-divider);
+      padding: 10px 10px 10px 0;
       text-align: left;
       vertical-align: top;
+      color: var(--color-fg-body);
     }
-    table.compat th { color: var(--text); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
-    table.compat td.good { color: var(--success); }
-    table.compat td.bad { color: var(--danger); }
+    table.compat th {
+      color: var(--color-fg-dim);
+      font-weight: 500;
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      padding-bottom: 10px;
+      border-bottom-color: var(--color-border);
+    }
+    table.compat td.good { color: var(--color-fg); }
+    table.compat td.bad { color: var(--color-error-text); }
+    table.compat tr:last-child th,
+    table.compat tr:last-child td { border-bottom: 0; }
 
+    /* ----- Sidebar ----- */
     aside.sidebar {
       position: sticky;
-      top: 24px;
-      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 20px 20px 14px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+      top: 32px;
+      padding: 28px 28px 22px;
+      border: 1px solid var(--color-border-section);
+      background: transparent;
+    }
+    @media (max-width: 960px) {
+      aside.sidebar { position: static; top: auto; }
     }
     aside.sidebar h2 {
-      margin: 0 0 12px;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.1em;
+      margin: 0 0 20px;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.28em;
       text-transform: uppercase;
-      color: var(--muted);
+      color: var(--color-fg-dim);
     }
+    aside.sidebar .sub-title {
+      font-family: var(--font-cormorant);
+      font-weight: 300;
+      font-size: 22px;
+      color: var(--color-fg);
+      line-height: 1.2;
+      margin-bottom: 16px;
+    }
+    aside.sidebar .sub-title em { font-style: italic; color: var(--color-fg-muted); }
+
     aside.sidebar table.ref {
       width: 100%;
       border-collapse: collapse;
@@ -279,603 +654,698 @@
     }
     aside.sidebar table.ref th,
     aside.sidebar table.ref td {
-      padding: 6px 4px;
-      border-bottom: 1px solid var(--border);
+      padding: 10px 4px;
+      border-bottom: 1px solid var(--color-border-divider);
       text-align: center;
       vertical-align: middle;
+      color: var(--color-fg-body);
     }
     aside.sidebar table.ref th:first-child,
     aside.sidebar table.ref td:first-child {
       text-align: left;
-      font-weight: 500;
-      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--color-fg);
+      font-size: 11.5px;
     }
     aside.sidebar table.ref th {
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
+      font-family: var(--font-inter);
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.2em;
       text-transform: uppercase;
-      color: var(--muted);
-      border-bottom-color: var(--border);
+      color: var(--color-fg-dim);
+      border-bottom-color: var(--color-border);
     }
     aside.sidebar tr:last-child td { border-bottom: 0; }
-    aside.sidebar td .y { color: var(--success); font-weight: 600; }
-    aside.sidebar td .n { color: var(--muted); opacity: 0.6; }
-    aside.sidebar td .m { color: #f4c36b; font-size: 11px; }
+    aside.sidebar td .y { color: var(--color-fg); }
+    aside.sidebar td .n { color: var(--color-fg-dim); }
+
     aside.sidebar .note {
-      margin-top: 12px;
-      padding-top: 10px;
-      border-top: 1px solid var(--border);
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--color-border-divider);
       font-size: 11.5px;
-      line-height: 1.5;
-      color: var(--muted);
+      line-height: 1.7;
+      color: var(--color-fg-body);
     }
-    aside.sidebar .note strong { color: var(--text); }
+    aside.sidebar .note .note-label {
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+      margin-bottom: 8px;
+    }
     aside.sidebar .drop-list {
-      margin: 6px 0 0;
-      padding-left: 16px;
-      color: var(--muted);
-      font-size: 11.5px;
-      line-height: 1.55;
+      margin: 4px 0 0;
+      padding: 0;
+      list-style: none;
     }
-    aside.sidebar .drop-list li { margin-bottom: 2px; }
-    kbd {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid var(--border);
-      border-bottom-width: 2px;
-      border-radius: 4px;
-      padding: 1px 6px;
-      font-size: 11px;
-      color: var(--text);
+    aside.sidebar .drop-list li {
+      display: flex;
+      gap: 12px;
+      padding: 3px 0;
+    }
+    aside.sidebar .drop-list li::before {
+      content: "";
+      display: inline-block;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--color-bullet);
+      flex-shrink: 0;
+      margin-top: 8px;
+    }
+    aside.sidebar code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--color-fg);
     }
 
+    kbd {
+      display: inline-block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px;
+      padding: 1px 6px;
+      color: var(--color-fg);
+      background: transparent;
+      border: 1px solid var(--color-border);
+    }
+
+    /* ----- Spinner (aligns with micro-type) ----- */
     .spinner {
       display: inline-block;
-      width: 12px; height: 12px;
-      margin-right: 8px;
-      border: 2px solid rgba(255, 255, 255, 0.25);
-      border-top-color: var(--text);
+      width: 10px; height: 10px;
+      margin-right: 10px;
+      border: 1px solid var(--color-border);
+      border-top-color: var(--color-fg);
       border-radius: 50%;
-      animation: spin 700ms linear infinite;
-      vertical-align: -2px;
+      animation: spin 900ms linear infinite;
+      vertical-align: -1px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Anki → Slides</h1>
-      <p>Drop any Anki export and download a 16:9 slide deck. Front and back become separate slides, in order. Nothing is stored — files are converted on the fly.</p>
-    </header>
 
-    <div class="layout">
-    <form id="form" class="card" autocomplete="off">
-      <label class="section" for="file-input">1. Upload your export</label>
-      <input id="file-input" class="sr-only-input" type="file" multiple accept=".txt,.zip,.apkg,text/plain,application/zip,application/octet-stream" />
-      <label id="drop" class="drop" for="file-input">
-        <div><strong>Click to choose</strong> or drag files here</div>
+<button
+  type="button"
+  class="theme-toggle"
+  data-theme-toggle
+  aria-label="Toggle color theme"
+  title="Toggle theme"
+>
+  <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+  </svg>
+  <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+  </svg>
+</button>
+
+<main>
+
+  <section class="hero fade-in-up delay-1">
+    <h1>
+      Anki<span class="arrow">→</span><em>Slides</em>
+    </h1>
+    <p class="lede">
+      Front and back become separate slides, in order. 16:9 output. Nothing is stored.
+    </p>
+  </section>
+
+  <section class="layout">
+
+    <form id="form" autocomplete="off">
+
+      <div class="step fade-in-up delay-2">
+        <div class="num">01</div>
+        <div class="label">Upload your export</div>
+      </div>
+
+      <input
+        id="file-input"
+        class="sr-only-input"
+        type="file"
+        multiple
+        accept=".txt,.zip,.apkg,text/plain,application/zip,application/octet-stream"
+      />
+      <label id="drop" class="drop fade-in-up delay-2" for="file-input">
+        <div class="title">Click to choose <em>or drag files here</em></div>
         <div class="hint">
-          <code>.apkg</code> · <code>.txt</code> (Notes or Cards in Plain Text) · <code>.zip</code> of a <code>.txt</code> + media · max 50 MB each · multi-file OK
+          <code>.apkg</code> &middot; <code>.txt</code> (Notes or Cards in Plain Text) &middot; <code>.zip</code> of a <code>.txt</code> + media &middot; max 50 MB each &middot; multi-file OK
         </div>
       </label>
 
       <div id="file-list" class="file-list" aria-live="polite"></div>
 
-      <label class="section" style="margin-top: 22px;">2. Pick a format</label>
-      <div class="formats" role="radiogroup" aria-label="Output format">
-        <label class="fmt active">
-          <input type="radio" name="format" value="pdf" checked />
-          <div class="title">PDF</div>
-          <div class="sub">single file</div>
-        </label>
-        <label class="fmt">
-          <input type="radio" name="format" value="pptx" />
-          <div class="title">PowerPoint</div>
-          <div class="sub">.pptx</div>
-        </label>
-        <label class="fmt">
-          <input type="radio" name="format" value="png" />
-          <div class="title">PNG</div>
-          <div class="sub">.zip of images</div>
-        </label>
+      <div class="formats-wrap">
+        <div class="step fade-in-up delay-3">
+          <div class="num">02</div>
+          <div class="label">Pick a format</div>
+        </div>
+
+        <div class="formats fade-in-up delay-3" role="radiogroup" aria-label="Output format">
+          <label class="fmt active">
+            <input type="radio" name="format" value="pdf" checked />
+            <div class="fmt-label">Document</div>
+            <div class="fmt-title">PDF</div>
+            <div class="fmt-sub">Single file</div>
+          </label>
+          <label class="fmt">
+            <input type="radio" name="format" value="pptx" />
+            <div class="fmt-label">Editable</div>
+            <div class="fmt-title">PowerPoint</div>
+            <div class="fmt-sub">.pptx</div>
+          </label>
+          <label class="fmt">
+            <input type="radio" name="format" value="png" />
+            <div class="fmt-label">Images</div>
+            <div class="fmt-title">PNG</div>
+            <div class="fmt-sub">.zip of images</div>
+          </label>
+        </div>
       </div>
 
-      <button type="submit" class="primary" id="submit" disabled>Convert &amp; download</button>
+      <button type="submit" class="primary" id="submit" disabled>
+        <span id="submit-label">Convert &amp; download</span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </button>
       <div id="status" class="status" role="status" aria-live="polite"></div>
 
-      <details class="help">
-        <summary>Which Anki export should I use?</summary>
-        <p>Easiest is <strong>Anki Deck Package (.apkg)</strong> — single file, images bundled. The right-side table summarizes what survives for each supported input.</p>
-        <table class="compat">
-          <thead>
-            <tr><th>Anki export option</th><th>Supported</th><th>Notes</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Anki Deck Package (.apkg)</strong></td>
-              <td class="good">Yes — recommended</td>
-              <td>One file, images bundled, nothing to tick. Works for the newest zstd-compressed bundles too.</td>
-            </tr>
-            <tr>
-              <td>Anki Collection Package (.colpkg)</td>
-              <td class="bad">Not accepted</td>
-              <td>That's Anki's full-profile backup — routinely multiple GB and always includes media you don't want on slides. Use File → Export → <strong>Current deck</strong> as <code>.apkg</code> instead.</td>
-            </tr>
-            <tr>
-              <td>Notes in Plain Text (.txt)</td>
-              <td class="good">Yes</td>
-              <td>Text only. To include images, tick <strong>Include HTML and media references</strong> and upload as a zip with <code>collection.media</code>.</td>
-            </tr>
-            <tr>
-              <td>Cards in Plain Text (.txt)</td>
-              <td class="good">Yes</td>
-              <td>Same shape as Notes, one row per card rather than per note.</td>
-            </tr>
-            <tr>
-              <td>PDF / HTML exporter (add-on)</td>
-              <td class="bad">Output only</td>
-              <td>Those are result formats, not inputs.</td>
-            </tr>
-          </tbody>
-        </table>
-      </details>
+      <div>
+        <details class="help">
+          <summary>Which Anki export should I use?</summary>
+          <p>Easiest is <strong>Anki Deck Package (.apkg)</strong> &mdash; single file, images bundled. The table at right summarises what survives for each supported input.</p>
+          <table class="compat">
+            <thead>
+              <tr><th>Anki export option</th><th>Supported</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Anki Deck Package (.apkg)</strong></td>
+                <td class="good">Yes &mdash; recommended</td>
+                <td>One file, images bundled, nothing to tick. Works for the newest zstd-compressed bundles too.</td>
+              </tr>
+              <tr>
+                <td>Anki Collection Package (.colpkg)</td>
+                <td class="bad">Not accepted</td>
+                <td>That's Anki's full-profile backup &mdash; routinely multiple GB and always includes media you don't want on slides. Use File &rarr; Export &rarr; <strong>Current deck</strong> as <code>.apkg</code> instead.</td>
+              </tr>
+              <tr>
+                <td>Notes in Plain Text (.txt)</td>
+                <td class="good">Yes</td>
+                <td>Text only. To include images, tick <strong>Include HTML and media references</strong> and upload as a zip with <code>collection.media</code>.</td>
+              </tr>
+              <tr>
+                <td>Cards in Plain Text (.txt)</td>
+                <td class="good">Yes</td>
+                <td>Same shape as Notes, one row per card rather than per note.</td>
+              </tr>
+              <tr>
+                <td>PDF / HTML exporter (add-on)</td>
+                <td class="bad">Output only</td>
+                <td>Those are result formats, not inputs.</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
 
-      <details class="help">
-        <summary>Using a .txt export with images</summary>
-        <ol>
-          <li>In Anki: <kbd>File</kbd> → <kbd>Export…</kbd> → <strong>Notes in Plain Text (.txt)</strong>.</li>
-          <li>Tick <strong>Include HTML and media references</strong>. Without this the <code>&lt;img&gt;</code> tags never make it into the file, so the images can't be matched later.</li>
-          <li>Leave “Include tags” and “Include deck name” off — they clutter the slides.</li>
-          <li>
-            Find your media folder — <kbd>Tools</kbd> → <kbd>Check Media…</kbd> shows the path. Defaults:
-            <ul>
-              <li>macOS: <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code></li>
-              <li>Windows: <code>%APPDATA%\Anki2\&lt;profile&gt;\collection.media</code></li>
-              <li>Linux: <code>~/.local/share/Anki2/&lt;profile&gt;/collection.media</code></li>
-            </ul>
-          </li>
-          <li>Select the <code>.txt</code> and the <code>collection.media</code> folder, right-click → <strong>Compress</strong>. Drop the resulting <code>.zip</code>.</li>
-        </ol>
-        <p style="font-size:12px">Or skip all of this and export an <code>.apkg</code> instead — it already contains everything.</p>
-      </details>
+        <details class="help">
+          <summary>Using a .txt export with images</summary>
+          <ol>
+            <li>In Anki: <kbd>File</kbd> &rarr; <kbd>Export&hellip;</kbd> &rarr; <strong>Notes in Plain Text (.txt)</strong>.</li>
+            <li>Tick <strong>Include HTML and media references</strong>. Without this the <code>&lt;img&gt;</code> tags never make it into the file, so the images can't be matched later.</li>
+            <li>Leave &ldquo;Include tags&rdquo; and &ldquo;Include deck name&rdquo; off &mdash; they clutter the slides.</li>
+            <li>
+              Find your media folder &mdash; <kbd>Tools</kbd> &rarr; <kbd>Check Media&hellip;</kbd> shows the path. Defaults:
+              <ul>
+                <li>macOS: <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code></li>
+                <li>Windows: <code>%APPDATA%\Anki2\&lt;profile&gt;\collection.media</code></li>
+                <li>Linux: <code>~/.local/share/Anki2/&lt;profile&gt;/collection.media</code></li>
+              </ul>
+            </li>
+            <li>Select the <code>.txt</code> and the <code>collection.media</code> folder, right-click &rarr; <strong>Compress</strong>. Drop the resulting <code>.zip</code>.</li>
+          </ol>
+          <p>Or skip all of this and export an <code>.apkg</code> instead &mdash; it already contains everything.</p>
+        </details>
+      </div>
+
     </form>
 
-    <aside class="sidebar" aria-label="Format quick reference">
-      <h2>What's included, by input format</h2>
+    <aside class="sidebar fade-in-up delay-4" aria-label="Format quick reference">
+      <h2>What's included</h2>
+      <div class="sub-title">By <em>input format</em></div>
+
       <table class="ref">
         <thead>
           <tr>
             <th></th>
             <th title="Card front and back text">Text</th>
             <th title="&lt;img src&gt; references, embedded into slides">Images</th>
-            <th title="Single-file upload">Single file</th>
+            <th title="Single-file upload">Single</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>.apkg</td>
-            <td><span class="y">✓</span></td>
-            <td><span class="y">✓</span></td>
-            <td><span class="y">✓</span></td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>.zip (.txt + media)</td>
-            <td><span class="y">✓</span></td>
-            <td><span class="y">✓</span></td>
-            <td><span class="y">✓</span></td>
+            <td>.zip (+ media)</td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
           </tr>
           <tr>
             <td>.txt only</td>
-            <td><span class="y">✓</span></td>
-            <td><span class="n">—</span></td>
-            <td><span class="y">✓</span></td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
           </tr>
         </tbody>
       </table>
 
       <div class="note">
-        <strong>Always dropped, in every format:</strong>
+        <div class="note-label">Always dropped</div>
         <ul class="drop-list">
-          <li>Bold / italic / colors / custom fonts</li>
-          <li>Audio &amp; video (<code>[sound:…]</code>)</li>
+          <li>Bold, italic, colours, custom fonts</li>
+          <li>Audio &amp; video (<code>[sound:&hellip;]</code>)</li>
           <li>MathJax / LaTeX stays as raw source</li>
           <li>Tags, deck name, scheduling</li>
         </ul>
       </div>
 
       <div class="note">
-        Cloze deletions <code>{{c1::…}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved.
+        <div class="note-label">Preserved</div>
+        <p style="margin:0">Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved.</p>
       </div>
     </aside>
-    </div>
 
-    <footer>
-      Runs entirely on a serverless function · no uploads are persisted
-    </footer>
-  </main>
+  </section>
 
-  <script>
-    const fileInput = document.getElementById("file-input");
-    const drop = document.getElementById("drop");
-    const fileList = document.getElementById("file-list");
-    const submit = document.getElementById("submit");
-    const status = document.getElementById("status");
-    const form = document.getElementById("form");
-    const fmtLabels = document.querySelectorAll(".fmt");
+</main>
 
-    // Each entry: { id, file, state: "pending"|"converting"|"done"|"error", message }
-    const entries = [];
-    let nextId = 1;
-    let converting = false;
-
-    // Keep this in sync with MAX_UPLOAD_BYTES in api/convert.py.
-    const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-    const MAX_UPLOAD_LABEL = "50 MB";
-
-    function formatBytes(n) {
-      if (n < 1024) return n + " B";
-      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-      if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + " MB";
-      return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
-    }
-
-    // Extensions we accept. .colpkg is Anki's full-profile backup (same binary
-    // format as .apkg but containing the entire collection and all media);
-    // it's almost always multi-GB and almost never what a user wants for
-    // slides, so we reject it explicitly with guidance to use .apkg instead.
-    const ACCEPTED_EXTS = new Set([".apkg", ".zip", ".txt"]);
-
-    function fileExt(file) {
-      return (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
-    }
-
-    function describeUnsupported(file) {
-      const ext = fileExt(file);
-      if (ext === ".colpkg") {
-        return (
-          "collection backups (.colpkg) aren't accepted — they contain your "
-          + "whole Anki profile and media library. In Anki, use File → Export "
-          + "→ Current deck, choose Anki Deck Package (.apkg), and drop that "
-          + "instead."
-        );
+<script>
+  // ---------------------------------------------------------------------
+  // Theme toggle
+  // ---------------------------------------------------------------------
+  (function () {
+    var toggle = document.querySelector("[data-theme-toggle]");
+    if (!toggle) return;
+    toggle.addEventListener("click", function () {
+      var isLight = document.documentElement.classList.toggle("light");
+      try { localStorage.setItem("theme", isLight ? "light" : "dark"); } catch (_) {}
+      // Keep the iOS status-bar tint in step with the palette.
+      var meta = document.querySelector('meta[name="theme-color"]:not([media])');
+      if (!meta) {
+        meta = document.createElement("meta");
+        meta.setAttribute("name", "theme-color");
+        document.head.appendChild(meta);
       }
+      meta.setAttribute("content", isLight ? "#faf8f5" : "#0d0d0d");
+    });
+  })();
+</script>
+
+<script>
+  // ---------------------------------------------------------------------
+  // Converter (unchanged behaviour from the previous build, only selectors
+  // touched — all validation, upload, and download flow is preserved).
+  // ---------------------------------------------------------------------
+  const fileInput = document.getElementById("file-input");
+  const drop = document.getElementById("drop");
+  const fileList = document.getElementById("file-list");
+  const submit = document.getElementById("submit");
+  const submitLabel = document.getElementById("submit-label");
+  const status = document.getElementById("status");
+  const form = document.getElementById("form");
+  const fmtLabels = document.querySelectorAll(".fmt");
+
+  const entries = [];
+  let nextId = 1;
+  let converting = false;
+
+  const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+  const MAX_UPLOAD_LABEL = "50 MB";
+
+  function formatBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + " MB";
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  }
+
+  // Extensions we accept. .colpkg is Anki's full-profile backup (same
+  // binary format as .apkg but containing the whole collection and all
+  // media); almost always multi-GB and almost never what a user wants
+  // for slides, so we reject it with guidance to use .apkg instead.
+  const ACCEPTED_EXTS = new Set([".apkg", ".zip", ".txt"]);
+
+  function fileExt(file) {
+    return (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  }
+
+  function describeUnsupported(file) {
+    const ext = fileExt(file);
+    if (ext === ".colpkg") {
       return (
-        "unsupported file type " + (ext || "(no extension)")
-        + " — drop an .apkg, a .txt, or a .zip containing a .txt plus media."
+        "collection backups (.colpkg) aren't accepted — they contain your "
+        + "whole Anki profile and media library. In Anki, use File → Export "
+        + "→ Current deck, choose Anki Deck Package (.apkg), and drop that "
+        + "instead."
       );
     }
+    return (
+      "unsupported file type " + (ext || "(no extension)")
+      + " — drop an .apkg, a .txt, or a .zip containing a .txt plus media."
+    );
+  }
 
-    function describeOversize(file) {
-      const ext = fileExt(file);
-      const size = formatBytes(file.size);
-      const base =
-        "too large (" + size + ", limit " + MAX_UPLOAD_LABEL + ")";
-      if (ext === ".apkg") {
-        return (
-          base +
-          " — try re-exporting just the deck you need, or uncheck Include media."
-        );
-      }
-      if (ext === ".zip") {
-        return (
-          base +
-          " — the zip is probably carrying your whole collection.media folder. " +
-          "Include only images actually referenced by the cards you're exporting, " +
-          "or export as Notes in Plain Text (.txt) without media."
-        );
-      }
+  function describeOversize(file) {
+    const ext = fileExt(file);
+    const size = formatBytes(file.size);
+    const base = "too large (" + size + ", limit " + MAX_UPLOAD_LABEL + ")";
+    if (ext === ".apkg") {
+      return base + " — try re-exporting just the deck you need, or uncheck Include media.";
+    }
+    if (ext === ".zip") {
       return (
         base +
-        " — try exporting a smaller subset from Anki (File → Export → Current deck)."
+        " — the zip is probably carrying your whole collection.media folder. " +
+        "Include only images actually referenced by the cards you're exporting, " +
+        "or export as Notes in Plain Text (.txt) without media."
       );
     }
+    return base + " — try exporting a smaller subset from Anki (File → Export → Current deck).";
+  }
 
-    function niceType(file) {
-      if (file.type && file.type !== "application/octet-stream") return file.type;
-      return (file.name.match(/\.[^.]+$/) || ["file"])[0].replace(".", "").toLowerCase();
-    }
+  function niceType(file) {
+    if (file.type && file.type !== "application/octet-stream") return file.type;
+    return (file.name.match(/\.[^.]+$/) || ["file"])[0].replace(".", "").toLowerCase();
+  }
 
-    function entryKey(file) {
-      return file.name + "|" + file.size + "|" + file.lastModified;
-    }
+  function entryKey(file) {
+    return file.name + "|" + file.size + "|" + file.lastModified;
+  }
 
-    function setStatus(msg, kind) {
-      status.className = "status" + (kind ? " " + kind : "");
-      status.innerHTML = msg || "";
-    }
+  function setStatus(msg, kind) {
+    status.className = "status" + (kind ? " " + kind : "");
+    status.innerHTML = msg || "";
+  }
 
-    function addFiles(fileListObj) {
-      const seen = new Set(entries.map((e) => entryKey(e.file)));
-      let added = 0;
-      const rejected = [];
-      for (const file of Array.from(fileListObj || [])) {
-        if (seen.has(entryKey(file))) continue;
-        seen.add(entryKey(file));
-        const ext = fileExt(file);
-        if (!ACCEPTED_EXTS.has(ext)) {
-          rejected.push({ file, reason: describeUnsupported(file) });
-          continue;
-        }
-        entries.push({ id: nextId++, file, state: "pending", message: "" });
-        added += 1;
-      }
-      if (rejected.length > 0) {
-        // Surface the first rejection in the status line; if there are several,
-        // show a count so the user knows more were skipped.
-        const first = rejected[0];
-        const extra = rejected.length > 1
-          ? " (and " + (rejected.length - 1) + " more skipped)"
-          : "";
-        setStatus(
-          "Skipped " + first.file.name + " — " + first.reason + extra,
-          "error"
-        );
-      } else if (added > 0) {
-        setStatus("");
-      }
-      renderList();
-    }
-
-    function removeEntry(id) {
-      if (converting) return;
-      const idx = entries.findIndex((e) => e.id === id);
-      if (idx >= 0) entries.splice(idx, 1);
-      renderList();
-    }
-
-    function clearAll() {
-      if (converting) return;
-      entries.length = 0;
-      fileInput.value = "";
-      renderList();
-      setStatus("");
-    }
-
-    function stateLabel(e) {
-      switch (e.state) {
-        case "pending": return "queued";
-        case "converting": return "converting…";
-        case "done": return e.message || "done";
-        case "error": return "failed — " + (e.message || "unknown");
-        default: return "";
-      }
-    }
-
-    function renderList() {
-      fileList.innerHTML = "";
-      if (entries.length === 0) {
-        fileList.classList.remove("visible");
-        submit.disabled = true;
-        submit.textContent = "Convert & download";
-        return;
-      }
-      fileList.classList.add("visible");
-      submit.disabled = converting;
-      submit.textContent = entries.length === 1
-        ? "Convert & download"
-        : "Convert & download " + entries.length + " files";
-
-      for (const e of entries) {
-        const row = document.createElement("div");
-        row.className = "file-row";
-        row.dataset.state = e.state;
-
-        const info = document.createElement("div");
-        info.className = "info";
-        const name = document.createElement("div");
-        name.className = "name";
-        name.textContent = e.file.name;
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = formatBytes(e.file.size) + " · " + niceType(e.file);
-        info.appendChild(name);
-        info.appendChild(meta);
-
-        const state = document.createElement("div");
-        state.className = "state";
-        state.textContent = stateLabel(e);
-
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "remove";
-        remove.textContent = "remove";
-        remove.setAttribute("aria-label", "Remove " + e.file.name);
-        remove.disabled = converting;
-        remove.addEventListener("click", () => removeEntry(e.id));
-
-        row.appendChild(info);
-        row.appendChild(state);
-        row.appendChild(remove);
-        fileList.appendChild(row);
-      }
-
-      const toolbar = document.createElement("div");
-      toolbar.className = "toolbar";
-      const summary = document.createElement("span");
-      const total = entries.reduce((s, e) => s + e.file.size, 0);
-      summary.textContent = entries.length + " file"
-        + (entries.length === 1 ? "" : "s") + " · " + formatBytes(total);
-      const clear = document.createElement("button");
-      clear.type = "button";
-      clear.textContent = "clear all";
-      clear.disabled = converting;
-      clear.addEventListener("click", clearAll);
-      toolbar.appendChild(summary);
-      toolbar.appendChild(clear);
-      fileList.appendChild(toolbar);
-    }
-
-    fileInput.addEventListener("change", (e) => {
-      addFiles(e.target.files);
-      // Let the same file be reselected later if the user removes it.
-      fileInput.value = "";
-    });
-
-    ["dragenter", "dragover"].forEach((ev) => {
-      drop.addEventListener(ev, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        drop.classList.add("hover");
-      });
-    });
-    ["dragleave", "drop"].forEach((ev) => {
-      drop.addEventListener(ev, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        drop.classList.remove("hover");
-      });
-    });
-    drop.addEventListener("drop", (e) => {
-      addFiles(e.dataTransfer && e.dataTransfer.files);
-    });
-
-    fmtLabels.forEach((lbl) => {
-      lbl.addEventListener("click", () => {
-        fmtLabels.forEach((l) => l.classList.remove("active"));
-        lbl.classList.add("active");
-      });
-    });
-
-    async function convertOne(entry, fmt) {
-      const file = entry.file;
+  function addFiles(fileListObj) {
+    const seen = new Set(entries.map((e) => entryKey(e.file)));
+    let added = 0;
+    const rejected = [];
+    for (const file of Array.from(fileListObj || [])) {
+      if (seen.has(entryKey(file))) continue;
+      seen.add(entryKey(file));
       const ext = fileExt(file);
       if (!ACCEPTED_EXTS.has(ext)) {
-        throw new Error(describeUnsupported(file));
+        rejected.push({ file, reason: describeUnsupported(file) });
+        continue;
       }
-      if (file.size <= 0) {
-        throw new Error("empty file");
-      }
-      if (file.size > MAX_UPLOAD_BYTES) {
-        throw new Error(describeOversize(file));
-      }
-
-      const isBinary = ext === ".zip" || ext === ".apkg"
-        || /zip/i.test(file.type || "");
-      const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
-      const url = "/api/convert?format=" + encodeURIComponent(fmt)
-        + "&filename=" + encodeURIComponent(file.name);
-
-      let res;
-      try {
-        res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": contentType },
-          body: file,
-        });
-      } catch (err) {
-        // fetch() rejects (rather than returning a non-2xx response) when the
-        // browser never got an HTTP status back — e.g. the server dropped the
-        // connection mid-upload because the body exceeded its ingress limit,
-        // the process isn't running, or the network blipped. The native message
-        // ("NetworkError when attempting to fetch resource") is useless to the
-        // user, so translate it into something actionable.
-        const hint =
-          file.size > 10 * 1024 * 1024
-            ? " The file is " + formatBytes(file.size)
-              + " — if that exceeds the server's upload limit the connection "
-              + "gets cut before a response is sent. Try a smaller export "
-              + "(File → Export → Current deck, uncheck Include media)."
-            : " Check that the converter is reachable, then try again.";
-        throw new Error("could not reach the converter." + hint);
-      }
-
-      if (!res.ok) {
-        let msg = "Conversion failed (" + res.status + ")";
-        try {
-          const j = await res.json();
-          if (j && j.error) msg = j.error;
-        } catch (_) {}
-        throw new Error(msg);
-      }
-
-      const slideCount = res.headers.get("X-Slide-Count");
-      const mediaCount = parseInt(res.headers.get("X-Media-Count") || "0", 10);
-      const blob = await res.blob();
-      const disposition = res.headers.get("Content-Disposition") || "";
-      const match = /filename="([^"]+)"/.exec(disposition);
-      const downloadName = match ? match[1]
-        : (file.name.replace(/\.[^.]+$/, "") + "." + (fmt === "png" ? "zip" : fmt));
-
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = downloadName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-
-      const mediaBlurb = mediaCount > 0
-        ? " · " + mediaCount + " image" + (mediaCount === 1 ? "" : "s")
+      entries.push({ id: nextId++, file, state: "pending", message: "" });
+      added += 1;
+    }
+    if (rejected.length > 0) {
+      const first = rejected[0];
+      const extra = rejected.length > 1
+        ? " (and " + (rejected.length - 1) + " more skipped)"
         : "";
-      return (slideCount || "?") + " slides" + mediaBlurb;
+      setStatus(
+        "Skipped " + first.file.name + " — " + first.reason + extra,
+        "error"
+      );
+    } else if (added > 0) {
+      setStatus("");
+    }
+    renderList();
+  }
+
+  function removeEntry(id) {
+    if (converting) return;
+    const idx = entries.findIndex((e) => e.id === id);
+    if (idx >= 0) entries.splice(idx, 1);
+    renderList();
+  }
+
+  function clearAll() {
+    if (converting) return;
+    entries.length = 0;
+    fileInput.value = "";
+    renderList();
+    setStatus("");
+  }
+
+  function stateLabel(e) {
+    switch (e.state) {
+      case "pending": return "queued";
+      case "converting": return "converting…";
+      case "done": return e.message || "done";
+      case "error": return "failed — " + (e.message || "unknown");
+      default: return "";
+    }
+  }
+
+  function setSubmitLabel(text) {
+    submitLabel.textContent = text;
+  }
+
+  function renderList() {
+    fileList.innerHTML = "";
+    if (entries.length === 0) {
+      fileList.classList.remove("visible");
+      submit.disabled = true;
+      setSubmitLabel("Convert & download");
+      return;
+    }
+    fileList.classList.add("visible");
+    submit.disabled = converting;
+    setSubmitLabel(entries.length === 1
+      ? "Convert & download"
+      : "Convert & download " + entries.length + " files");
+
+    for (const e of entries) {
+      const row = document.createElement("div");
+      row.className = "file-row";
+      row.dataset.state = e.state;
+
+      const info = document.createElement("div");
+      info.className = "info";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = e.file.name;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = formatBytes(e.file.size) + " · " + niceType(e.file);
+      info.appendChild(name);
+      info.appendChild(meta);
+
+      const state = document.createElement("div");
+      state.className = "state";
+      state.textContent = stateLabel(e);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove";
+      remove.textContent = "remove";
+      remove.setAttribute("aria-label", "Remove " + e.file.name);
+      remove.disabled = converting;
+      remove.addEventListener("click", () => removeEntry(e.id));
+
+      row.appendChild(info);
+      row.appendChild(state);
+      row.appendChild(remove);
+      fileList.appendChild(row);
     }
 
-    form.addEventListener("submit", async (e) => {
+    const toolbar = document.createElement("div");
+    toolbar.className = "toolbar";
+    const summary = document.createElement("span");
+    const total = entries.reduce((s, e) => s + e.file.size, 0);
+    summary.textContent = entries.length + " file"
+      + (entries.length === 1 ? "" : "s") + " · " + formatBytes(total);
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.textContent = "clear all";
+    clear.disabled = converting;
+    clear.addEventListener("click", clearAll);
+    toolbar.appendChild(summary);
+    toolbar.appendChild(clear);
+    fileList.appendChild(toolbar);
+  }
+
+  fileInput.addEventListener("change", (e) => {
+    addFiles(e.target.files);
+    fileInput.value = "";
+  });
+
+  ["dragenter", "dragover"].forEach((ev) => {
+    drop.addEventListener(ev, (e) => {
       e.preventDefault();
-      if (converting || entries.length === 0) return;
-      const fmt = document.querySelector('input[name="format"]:checked').value;
-
-      // Reset per-file state so re-submits don't keep stale icons.
-      for (const entry of entries) {
-        entry.state = "pending";
-        entry.message = "";
-      }
-      converting = true;
-      submit.disabled = true;
-      renderList();
-
-      let done = 0;
-      let failed = 0;
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i];
-        entry.state = "converting";
-        renderList();
-        setStatus(
-          '<span class="spinner"></span>Converting ' + (i + 1) + " of "
-          + entries.length + " — " + entry.file.name + "…"
-        );
-        try {
-          const summary = await convertOne(entry, fmt);
-          entry.state = "done";
-          entry.message = summary;
-          done += 1;
-        } catch (err) {
-          entry.state = "error";
-          entry.message = err && err.message ? err.message : String(err);
-          failed += 1;
-        }
-        renderList();
-        // Small pause so browsers are willing to fire successive downloads.
-        if (i + 1 < entries.length) await new Promise((r) => setTimeout(r, 250));
-      }
-
-      converting = false;
-      submit.disabled = entries.length === 0;
-      renderList();
-
-      if (failed === 0) {
-        setStatus(
-          "Done — " + done + " file" + (done === 1 ? "" : "s") + " converted",
-          "success"
-        );
-      } else if (done === 0) {
-        setStatus(
-          "All " + failed + " file" + (failed === 1 ? "" : "s")
-          + " failed — see details above",
-          "error"
-        );
-      } else {
-        setStatus(
-          done + " of " + (done + failed) + " converted — "
-          + failed + " failed, see details above",
-          "error"
-        );
-      }
+      e.stopPropagation();
+      drop.classList.add("hover");
     });
+  });
+  ["dragleave", "drop"].forEach((ev) => {
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.remove("hover");
+    });
+  });
+  drop.addEventListener("drop", (e) => {
+    addFiles(e.dataTransfer && e.dataTransfer.files);
+  });
 
+  fmtLabels.forEach((lbl) => {
+    lbl.addEventListener("click", () => {
+      fmtLabels.forEach((l) => l.classList.remove("active"));
+      lbl.classList.add("active");
+    });
+  });
+
+  async function convertOne(entry, fmt) {
+    const file = entry.file;
+    const ext = fileExt(file);
+    if (!ACCEPTED_EXTS.has(ext)) {
+      throw new Error(describeUnsupported(file));
+    }
+    if (file.size <= 0) {
+      throw new Error("empty file");
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(describeOversize(file));
+    }
+
+    const isBinary = ext === ".zip" || ext === ".apkg"
+      || /zip/i.test(file.type || "");
+    const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
+    const url = "/api/convert?format=" + encodeURIComponent(fmt)
+      + "&filename=" + encodeURIComponent(file.name);
+
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+    } catch (err) {
+      // fetch() rejects (rather than returning a non-2xx response) when the
+      // browser never got an HTTP status back — e.g. the server dropped the
+      // connection mid-upload because the body exceeded its ingress limit,
+      // the process isn't running, or the network blipped. The native
+      // message ("NetworkError when attempting to fetch resource") is
+      // useless, so translate it into something actionable.
+      const hint =
+        file.size > 10 * 1024 * 1024
+          ? " The file is " + formatBytes(file.size)
+            + " — if that exceeds the server's upload limit the connection "
+            + "gets cut before a response is sent. Try a smaller export "
+            + "(File → Export → Current deck, uncheck Include media)."
+          : " Check that the converter is reachable, then try again.";
+      throw new Error("could not reach the converter." + hint);
+    }
+
+    if (!res.ok) {
+      let msg = "Conversion failed (" + res.status + ")";
+      try {
+        const j = await res.json();
+        if (j && j.error) msg = j.error;
+      } catch (_) {}
+      throw new Error(msg);
+    }
+
+    const slideCount = res.headers.get("X-Slide-Count");
+    const mediaCount = parseInt(res.headers.get("X-Media-Count") || "0", 10);
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const downloadName = match ? match[1]
+      : (file.name.replace(/\.[^.]+$/, "") + "." + (fmt === "png" ? "zip" : fmt));
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+    const mediaBlurb = mediaCount > 0
+      ? " · " + mediaCount + " image" + (mediaCount === 1 ? "" : "s")
+      : "";
+    return (slideCount || "?") + " slides" + mediaBlurb;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (converting || entries.length === 0) return;
+    const fmt = document.querySelector('input[name="format"]:checked').value;
+
+    for (const entry of entries) {
+      entry.state = "pending";
+      entry.message = "";
+    }
+    converting = true;
+    submit.disabled = true;
     renderList();
-  </script>
+
+    let done = 0;
+    let failed = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      entry.state = "converting";
+      renderList();
+      setStatus(
+        '<span class="spinner"></span>Converting ' + (i + 1) + " of "
+        + entries.length + " — " + entry.file.name + "…"
+      );
+      try {
+        const summary = await convertOne(entry, fmt);
+        entry.state = "done";
+        entry.message = summary;
+        done += 1;
+      } catch (err) {
+        entry.state = "error";
+        entry.message = err && err.message ? err.message : String(err);
+        failed += 1;
+      }
+      renderList();
+      if (i + 1 < entries.length) await new Promise((r) => setTimeout(r, 250));
+    }
+
+    converting = false;
+    submit.disabled = entries.length === 0;
+    renderList();
+
+    if (failed === 0) {
+      setStatus(
+        "Done — " + done + " file" + (done === 1 ? "" : "s") + " converted",
+        "success"
+      );
+    } else if (done === 0) {
+      setStatus(
+        "All " + failed + " file" + (failed === 1 ? "" : "s")
+        + " failed — see details above",
+        "error"
+      );
+    } else {
+      setStatus(
+        done + " of " + (done + failed) + " converted — "
+        + failed + " failed, see details above",
+        "error"
+      );
+    }
+  });
+
+  renderList();
+</script>
+
 </body>
 </html>
