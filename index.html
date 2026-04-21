@@ -1232,21 +1232,139 @@
   });
 
   // ------------------------------------------------------------------
-  // Vercel Blob client SDK, loaded lazily from esm.sh the first time a
-  // user queues a file bigger than RAW_BODY_THRESHOLD. Cached in a
-  // Promise so concurrent uploads share a single network fetch for the
-  // module.
-  // ------------------------------------------------------------------
-  let _blobClientPromise = null;
-  function loadBlobClient() {
-    if (!_blobClientPromise) {
-      _blobClientPromise = import("https://esm.sh/@vercel/blob@2/client")
-        .catch((err) => {
-          _blobClientPromise = null; // allow retry on next attempt
-          throw err;
-        });
+  // Hand-rolled Vercel Blob client upload. We originally loaded the
+  // official `@vercel/blob/client` SDK via esm.sh, but esm.sh doesn't
+  // respect the package's `"browser"` field mapping in package.json —
+  // it delivered the Node flavour of undici, which silently coerced the
+  // browser `File` object to a string. Every upload landed in Blob as
+  // the literal 28-byte payload `"[object ReadableStream]"`, which our
+  // Python converter then happily parsed as a 1-line Anki export → a
+  // 2-slide PDF whose contents were the string itself.
+  //
+  // The wire protocol is small enough to implement directly:
+  //   1. POST /api/blob-upload with a handshake envelope; server
+  //      responds with a short-lived `clientToken`.
+  //   2. PUT the file bytes to https://vercel.com/api/blob/?pathname=…
+  //      with the token + a handful of x-api-* headers.
+  //   3. Parse the JSON response; `url` is the CDN URL the converter
+  //      can then fetch.
+  //
+  // Using XHR for step 2 (rather than fetch) so we get real upload
+  // progress events — fetch() only exposes download progress.
+  //
+  // If Vercel bumps BLOB_API_VERSION beyond 12 with breaking changes,
+  // the PUT will start returning 4xx and we bump the constant here.
+  const VERCEL_BLOB_API_URL = "https://vercel.com/api/blob";
+  const VERCEL_BLOB_API_VERSION = "12";
+
+  async function fetchBlobClientToken(pathname) {
+    const res = await fetch("/api/blob-upload", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "blob.generate-client-token",
+        payload: {
+          pathname,
+          clientPayload: null,
+          multipart: false,
+        },
+      }),
+    });
+    if (!res.ok) {
+      // /api/blob-upload's diagnostic branch includes a specific error
+      // message — propagate it so users see the actionable reason
+      // (missing env var, invalid body, etc.).
+      let msg = "could not get an upload token (HTTP " + res.status + ")";
+      try {
+        const j = await res.json();
+        if (j && j.error) msg = j.error;
+      } catch (_) {}
+      throw new Error(msg);
     }
-    return _blobClientPromise;
+    const data = await res.json();
+    if (!data || !data.clientToken) {
+      throw new Error("token endpoint returned no clientToken");
+    }
+    return data.clientToken;
+  }
+
+  function uploadToBlob(file, { onUploadProgress } = {}) {
+    return new Promise(async (resolve, reject) => {
+      let clientToken;
+      try {
+        clientToken = await fetchBlobClientToken(file.name);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
+      const contentType = file.type || "application/octet-stream";
+      const url = VERCEL_BLOB_API_URL + "/?pathname="
+        + encodeURIComponent(file.name);
+      const requestId = Date.now() + ":"
+        + Math.random().toString(16).slice(2);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url, true);
+      xhr.setRequestHeader("authorization", "Bearer " + clientToken);
+      xhr.setRequestHeader("x-api-version", VERCEL_BLOB_API_VERSION);
+      xhr.setRequestHeader("x-api-blob-request-id", requestId);
+      xhr.setRequestHeader("x-api-blob-request-attempt", "0");
+      // The token already embeds access="public" and other constraints
+      // (from onBeforeGenerateToken). These headers echo the per-upload
+      // fields the SDK itself sends — server-side validation matches on
+      // the token's embedded policy.
+      xhr.setRequestHeader("x-vercel-blob-access", "public");
+      xhr.setRequestHeader("x-content-type", contentType);
+
+      if (xhr.upload && typeof onUploadProgress === "function") {
+        xhr.upload.addEventListener("progress", (ev) => {
+          if (!ev.lengthComputable) return;
+          onUploadProgress({
+            loaded: ev.loaded,
+            total: ev.total,
+            percentage: ev.total > 0
+              ? Number(((ev.loaded / ev.total) * 100).toFixed(2))
+              : 0,
+          });
+        });
+      }
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (err) {
+            reject(new Error(
+              "blob API returned invalid JSON: " + xhr.responseText.slice(0, 200)
+            ));
+          }
+          return;
+        }
+        // Try to surface the server-side reason. Vercel's blob API
+        // returns errors as `{ error: { code, message } }`.
+        let msg = "upload failed (HTTP " + xhr.status + ")";
+        try {
+          const body = JSON.parse(xhr.responseText);
+          if (body && body.error && body.error.message) {
+            msg = body.error.message;
+          } else if (body && body.message) {
+            msg = body.message;
+          }
+        } catch (_) {
+          if (xhr.responseText) msg += " — " + xhr.responseText.slice(0, 200);
+        }
+        reject(new Error(msg));
+      });
+      xhr.addEventListener("error", () => {
+        reject(new Error("network error during upload"));
+      });
+      xhr.addEventListener("abort", () => {
+        reject(new Error("upload aborted"));
+      });
+
+      xhr.send(file);
+    });
   }
 
   async function postConvertRaw(entry, fmt) {
@@ -1278,33 +1396,13 @@
   async function postConvertBlob(entry, fmt) {
     const file = entry.file;
 
-    // Load the SDK on demand — keeps the cold-start bundle at zero JS for
-    // the common "drop a small .txt" case.
-    let upload;
-    try {
-      ({ upload } = await loadBlobClient());
-    } catch (err) {
-      throw new Error(
-        "could not load the Vercel Blob client from esm.sh — check your "
-        + "network connection, then retry."
-      );
-    }
-
     entry.state = "uploading";
     entry.progress = 0;
     renderList();
 
     let blob;
     try {
-      blob = await upload(file.name, file, {
-        // Must match the Blob store's access mode in the Vercel dashboard.
-        // Public fits here: uploads are transient (convert-and-discard),
-        // `addRandomSuffix` on the server gives us unguessable URLs, and
-        // the Python convert function can fetch blob.url with a plain GET
-        // — no Bearer-token plumbing required.
-        access: "public",
-        handleUploadUrl: "/api/blob-upload",
-        contentType: file.type || "application/octet-stream",
+      blob = await uploadToBlob(file, {
         onUploadProgress: (ev) => {
           if (!ev || typeof ev.percentage !== "number") return;
           entry.progress = Math.floor(ev.percentage);
@@ -1313,14 +1411,7 @@
       });
     } catch (err) {
       const raw = (err && err.message) ? err.message : String(err);
-      // Log the full SDK error to the console so we never hide useful
-      // debugging context behind a friendlier UI message.
       if (typeof console !== "undefined") console.error("Blob upload failed", err);
-      // Detect the genuinely-unconfigured case narrowly. The @vercel/blob
-      // SDK namespaces nearly every error with the literal prefix "Vercel
-      // Blob:" so a broad match here would wrongly claim "not set up" for
-      // totally unrelated failures (access mismatch, 400s, CORS, etc.).
-      // Only these two phrases uniquely identify "no token in env".
       if (/BLOB_READ_WRITE_TOKEN|No token found/i.test(raw)) {
         throw new Error(
           "Vercel Blob isn't set up on this project. In your Vercel "
