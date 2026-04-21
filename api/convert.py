@@ -1,10 +1,28 @@
 """Vercel Python serverless handler.
 
-Accepts a POST with one of:
-  - a UTF-8 tab-separated Anki export (``.txt``) as the raw body, OR
-  - a plain ``.zip`` containing one ``.txt`` export plus referenced images
-    (the zip may mirror your ``collection.media`` folder — we flatten by
-    basename), OR
+Accepts a POST in one of two shapes:
+
+1. **Raw body** (legacy fast path, ≤ 4.5 MB)
+
+   ``Content-Type: application/octet-stream | text/plain``
+   Body: the raw bytes of a ``.txt``, ``.zip`` or ``.apkg``.
+
+2. **JSON body referencing a Vercel Blob** (large uploads, no size cap)
+
+   ``Content-Type: application/json``
+   Body: ``{ "blobUrl": "https://...blob.vercel-storage.com/...",
+           "filename": "deck.apkg" }``
+
+   The client uploaded the file straight to Vercel Blob via
+   ``/api/blob-upload`` — we just fetch it. An outbound fetch from a
+   function is not capped, so this path bypasses Vercel's 4.5 MB
+   request-body platform limit entirely.
+
+Regardless of the upload shape, we recognise the same payload types:
+  - a UTF-8 tab-separated Anki export (``.txt``), OR
+  - a plain ``.zip`` containing one ``.txt`` export plus referenced
+    images (the zip may mirror your ``collection.media`` folder — we
+    flatten by basename), OR
   - an Anki ``.apkg`` bundle: we read the SQLite collection inside,
     reconstruct a TSV from the ``notes`` table, and extract media with
     their original filenames so ``<img>`` tags resolve.
@@ -17,11 +35,14 @@ export workflow instead.
 
 Query params:
   - format: one of ``pdf``, ``pptx``, ``png``
-  - filename: original upload filename (used to name the download)
+  - filename: original upload filename (used to name the download);
+              overridden by the JSON body's ``filename`` field if present.
 
 Returns the rendered deck as a file download. Nothing is persisted on the
 server; uploads are extracted to a per-request temp dir that is removed
-before the response returns.
+before the response returns. Input blobs on the Blob store are not
+deleted here — use Vercel's dashboard lifecycle rules (or manual pruning)
+to keep storage from growing.
 """
 from __future__ import annotations
 
@@ -35,6 +56,8 @@ import sqlite3
 import sys
 import tempfile
 import traceback
+import urllib.error
+import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -49,11 +72,22 @@ if _REPO_ROOT not in sys.path:
 import anki_to_slides as ats  # noqa: E402
 
 
-# Vercel's Python serverless runtime enforces a hard 4.5 MB request-body
-# limit at the platform edge — anything larger is rejected with a bare 413
-# before this handler runs. Match that ceiling here so locally and on
-# Vercel we surface the same friendly message when a file is oversize.
+# Vercel's Python serverless runtime enforces a hard 4.5 MB **request-body**
+# limit at the platform edge. For the raw-body code path (Content-Type:
+# application/octet-stream | text/plain) we reject anything larger up front.
+# The JSON/Blob code path reuses this as the cap on how many bytes we'll
+# pull back down from Vercel Blob, but the ceiling there is much higher
+# because the file never flowed *through* a Vercel request body.
 MAX_UPLOAD_BYTES = 4_500_000  # 4.5 MB — Vercel request body hard limit
+MAX_BLOB_BYTES = 100 * 1024 * 1024  # 100 MB — mirrors api/blob-upload.js
+
+# Whitelist of hosts we'll blob-fetch from. Prevents the endpoint from
+# being used as a generic "fetch-anything" proxy: if someone POSTs a
+# `blobUrl` pointing at, say, an internal metadata service, we refuse.
+# Vercel Blob URLs end in `.vercel-storage.com` (public store URLs look
+# like `<id>.public.blob.vercel-storage.com`).
+_BLOB_HOST_SUFFIX = ".vercel-storage.com"
+_BLOB_FETCH_TIMEOUT = 25  # seconds — well under the 60 s function timeout
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
@@ -362,6 +396,65 @@ def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
     return text, media_count
 
 
+def _fetch_blob_bytes(blob_url: str) -> bytes:
+    """Download a Vercel Blob URL's contents into memory, capped at MAX_BLOB_BYTES.
+
+    We validate the hostname first so this endpoint can't be coerced into
+    fetching arbitrary URLs (SSRF protection). The fetch streams in 256 KB
+    chunks and aborts early if we cross the cap — important because a
+    malicious client could otherwise register a 5 GB blob and force us to
+    download it before failing.
+    """
+    parsed = urlparse(blob_url)
+    if parsed.scheme != "https":
+        raise ValueError("blobUrl must use https://")
+    host = (parsed.hostname or "").lower()
+    if not host.endswith(_BLOB_HOST_SUFFIX):
+        raise ValueError(
+            f"blobUrl host {host!r} is not a Vercel Blob URL "
+            f"(expected *{_BLOB_HOST_SUFFIX})"
+        )
+
+    req = urllib.request.Request(blob_url, method="GET")
+    try:
+        resp = urllib.request.urlopen(req, timeout=_BLOB_FETCH_TIMEOUT)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(
+            f"blobUrl returned HTTP {exc.code} — the upload may have "
+            f"expired or been deleted"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"could not reach blob storage: {exc.reason}") from exc
+
+    # Honour Content-Length when the CDN provides one; fall back to a
+    # streaming read otherwise. Either way enforce the cap.
+    content_length_hdr = resp.headers.get("Content-Length")
+    if content_length_hdr:
+        try:
+            declared = int(content_length_hdr)
+        except ValueError:
+            declared = -1
+        if declared > MAX_BLOB_BYTES:
+            raise ValueError(
+                f"blob is {declared / (1024 * 1024):.1f} MB, exceeds the "
+                f"{MAX_BLOB_BYTES / (1024 * 1024):.0f} MB cap"
+            )
+
+    buf = bytearray()
+    chunk = 256 * 1024
+    while True:
+        data = resp.read(chunk)
+        if not data:
+            break
+        buf.extend(data)
+        if len(buf) > MAX_BLOB_BYTES:
+            raise ValueError(
+                f"blob body exceeds the "
+                f"{MAX_BLOB_BYTES / (1024 * 1024):.0f} MB cap"
+            )
+    return bytes(buf)
+
+
 class handler(BaseHTTPRequestHandler):
     def _send_json_error(self, status: int, message: str) -> None:
         body = json.dumps({"error": message}, ensure_ascii=False).encode("utf-8")
@@ -415,16 +508,67 @@ class handler(BaseHTTPRequestHandler):
             content_length = 0
         if content_length <= 0:
             return self._send_json_error(400, "empty request body")
-        if content_length > MAX_UPLOAD_BYTES:
-            return self._send_json_error(
-                413,
-                f"file too large ({content_length / (1024 * 1024):.2f} MB, "
-                f"max {MAX_UPLOAD_BYTES / (1024 * 1024):.1f} MB). "
-                "Re-export from Anki as File \u2192 Export \u2192 Current deck "
-                "and untick \u201CInclude media\u201D if you don't need images.",
-            )
 
-        raw = self.rfile.read(content_length)
+        # Two upload shapes: a tiny JSON envelope referencing a Vercel Blob
+        # (the escape hatch for > 4.5 MB files), or the raw file bytes
+        # (legacy fast path, ≤ 4.5 MB). We dispatch on Content-Type.
+        content_type = (self.headers.get("Content-Type") or "").lower()
+        is_json_body = content_type.startswith("application/json")
+
+        if is_json_body:
+            # The JSON envelope itself is tiny — reject anything bigger than
+            # a kilobyte so we can't be made to buffer garbage.
+            if content_length > 8 * 1024:
+                return self._send_json_error(
+                    400, "JSON envelope too large (max 8 KB)"
+                )
+            try:
+                envelope = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                return self._send_json_error(
+                    400, f"invalid JSON body: {exc}"
+                )
+            blob_url = envelope.get("blobUrl") if isinstance(envelope, dict) else None
+            if not isinstance(blob_url, str) or not blob_url:
+                return self._send_json_error(
+                    400, "JSON body must include a string `blobUrl`"
+                )
+            # JSON filename overrides the query-param filename when both
+            # are supplied — the JSON one reflects the *user's* original
+            # upload, the query one is cosmetic.
+            json_filename = envelope.get("filename")
+            if isinstance(json_filename, str) and json_filename:
+                raw_filename = json_filename
+                stem = _clean_stem(raw_filename)
+                if raw_filename.lower().endswith(".colpkg"):
+                    return self._send_json_error(
+                        415,
+                        "collection backups (.colpkg) aren't accepted. In Anki, "
+                        "use File \u2192 Export \u2192 Current deck, choose Anki "
+                        "Deck Package (.apkg), and upload that instead.",
+                    )
+            try:
+                raw = _fetch_blob_bytes(blob_url)
+            except ValueError as exc:
+                return self._send_json_error(400, f"blob fetch failed: {exc}")
+            except Exception as exc:
+                traceback.print_exc()
+                return self._send_json_error(
+                    500, f"blob fetch failed: {type(exc).__name__}: {exc}"
+                )
+            if not raw:
+                return self._send_json_error(400, "blob is empty")
+        else:
+            if content_length > MAX_UPLOAD_BYTES:
+                return self._send_json_error(
+                    413,
+                    f"file too large ({content_length / (1024 * 1024):.2f} MB, "
+                    f"max {MAX_UPLOAD_BYTES / (1024 * 1024):.1f} MB for direct "
+                    "upload). Files above this cap are routed through Vercel "
+                    "Blob by the frontend automatically — if you're seeing "
+                    "this error, Blob may not be configured on the server.",
+                )
+            raw = self.rfile.read(content_length)
 
         workdir: Optional[str] = None
         source_kind = "txt"

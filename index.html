@@ -386,7 +386,8 @@
     }
     .file-row[data-state="done"] .state { color: var(--color-success-text); }
     .file-row[data-state="error"] .state { color: var(--color-error-text); }
-    .file-row[data-state="converting"] .state { color: var(--color-fg); }
+    .file-row[data-state="converting"] .state,
+    .file-row[data-state="uploading"] .state { color: var(--color-fg); }
     .file-row button.remove {
       background: transparent;
       border: 1px solid var(--color-border);
@@ -792,7 +793,7 @@
       <label id="drop" class="drop fade-in-up delay-2" for="file-input">
         <div class="title">Click to choose <em>or drag files here</em></div>
         <div class="hint">
-          <code>.apkg</code> &middot; <code>.txt</code> (Notes or Cards in Plain Text) &middot; <code>.zip</code> of a <code>.txt</code> + media &middot; max 4.5 MB each &middot; multi-file OK
+          <code>.apkg</code> &middot; <code>.txt</code> (Notes or Cards in Plain Text) &middot; <code>.zip</code> of a <code>.txt</code> + media &middot; max 100 MB each &middot; multi-file OK
         </div>
       </label>
 
@@ -987,13 +988,26 @@
   let nextId = 1;
   let converting = false;
 
-  // Vercel's Python serverless runtime rejects request bodies larger than
-  // 4.5 MB at the platform edge (before our handler runs), returning a bare
-  // 413 with no JSON body. Mirror that hard limit here so we can reject
-  // oversize files client-side with an actionable message instead of
-  // surfacing "CONVERSION FAILED (413)" after a round-trip.
-  const MAX_UPLOAD_BYTES = Math.floor(4.5 * 1024 * 1024);
-  const MAX_UPLOAD_LABEL = "4.5 MB";
+  // We route uploads through two paths:
+  //
+  //   • RAW_BODY_THRESHOLD and below: POST the file bytes directly to
+  //     /api/convert. Fast — one round-trip, no Blob needed. The ceiling
+  //     matches Vercel's hard 4.5 MB platform request-body limit; we stay
+  //     comfortably under it so margin-of-error doesn't trip a 413.
+  //
+  //   • Above RAW_BODY_THRESHOLD, up to MAX_UPLOAD_BYTES: use Vercel Blob
+  //     client uploads. The browser exchanges a signed token with
+  //     /api/blob-upload, PUTs the file straight to blob.vercel-storage.com
+  //     (which has no 4.5 MB cap because it never touches a Vercel
+  //     Function), then hands /api/convert just a JSON { blobUrl, filename }
+  //     envelope. This circumvents the platform ingress limit entirely.
+  //
+  // The absolute MAX_UPLOAD_BYTES must match `maximumSizeInBytes` in
+  // api/blob-upload.js — the server-issued client token rejects anything
+  // larger than its own cap, regardless of what this file says.
+  const RAW_BODY_THRESHOLD = 4 * 1024 * 1024;
+  const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+  const MAX_UPLOAD_LABEL = "100 MB";
 
   function formatBytes(n) {
     if (n < 1024) return n + " B";
@@ -1108,6 +1122,10 @@
   function stateLabel(e) {
     switch (e.state) {
       case "pending": return "queued";
+      case "uploading":
+        return typeof e.progress === "number"
+          ? "uploading " + e.progress + "%"
+          : "uploading…";
       case "converting": return "converting…";
       case "done": return e.message || "done";
       case "error": return "failed — " + (e.message || "unknown");
@@ -1213,6 +1231,115 @@
     });
   });
 
+  // ------------------------------------------------------------------
+  // Vercel Blob client SDK, loaded lazily from esm.sh the first time a
+  // user queues a file bigger than RAW_BODY_THRESHOLD. Cached in a
+  // Promise so concurrent uploads share a single network fetch for the
+  // module.
+  // ------------------------------------------------------------------
+  let _blobClientPromise = null;
+  function loadBlobClient() {
+    if (!_blobClientPromise) {
+      _blobClientPromise = import("https://esm.sh/@vercel/blob@2/client")
+        .catch((err) => {
+          _blobClientPromise = null; // allow retry on next attempt
+          throw err;
+        });
+    }
+    return _blobClientPromise;
+  }
+
+  async function postConvertRaw(entry, fmt) {
+    const file = entry.file;
+    const ext = fileExt(file);
+    const isBinary = ext === ".zip" || ext === ".apkg"
+      || /zip/i.test(file.type || "");
+    const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
+    const url = "/api/convert?format=" + encodeURIComponent(fmt)
+      + "&filename=" + encodeURIComponent(file.name);
+    try {
+      return await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+    } catch (err) {
+      // fetch() rejects (rather than returning a non-2xx response) when the
+      // browser never got an HTTP status back — server dropped the
+      // connection mid-upload, process isn't running, or the network
+      // blipped. The native message is useless, so we translate.
+      throw new Error(
+        "could not reach the converter. Check that the converter is "
+        + "reachable, then try again."
+      );
+    }
+  }
+
+  async function postConvertBlob(entry, fmt) {
+    const file = entry.file;
+
+    // Load the SDK on demand — keeps the cold-start bundle at zero JS for
+    // the common "drop a small .txt" case.
+    let upload;
+    try {
+      ({ upload } = await loadBlobClient());
+    } catch (err) {
+      throw new Error(
+        "could not load the Vercel Blob client from esm.sh — check your "
+        + "network connection, then retry."
+      );
+    }
+
+    entry.state = "uploading";
+    entry.progress = 0;
+    renderList();
+
+    let blob;
+    try {
+      blob = await upload(file.name, file, {
+        access: "public",
+        handleUploadUrl: "/api/blob-upload",
+        contentType: file.type || "application/octet-stream",
+        onUploadProgress: (ev) => {
+          if (!ev || typeof ev.percentage !== "number") return;
+          entry.progress = Math.floor(ev.percentage);
+          renderList();
+        },
+      });
+    } catch (err) {
+      const raw = (err && err.message) ? err.message : String(err);
+      // The most common cause: no Blob store connected to the project, so
+      // /api/blob-upload can't mint a token. Detect the marker strings the
+      // SDK/server surface and give the operator a concrete fix.
+      if (/BLOB_READ_WRITE_TOKEN|No token found|Vercel Blob/i.test(raw)) {
+        throw new Error(
+          "Vercel Blob isn't set up on this project. In your Vercel "
+          + "dashboard: Project \u2192 Storage \u2192 Create \u2192 Blob \u2192 "
+          + "Connect. Redeploy, then retry."
+        );
+      }
+      throw new Error("upload to Blob failed: " + raw);
+    }
+
+    entry.state = "converting";
+    entry.progress = undefined;
+    renderList();
+
+    const url = "/api/convert?format=" + encodeURIComponent(fmt);
+    try {
+      return await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blobUrl: blob.url, filename: file.name }),
+      });
+    } catch (err) {
+      throw new Error(
+        "upload succeeded but the converter didn't respond. Retry in a "
+        + "moment — your file is still in Blob storage."
+      );
+    }
+  }
+
   async function convertOne(entry, fmt) {
     const file = entry.file;
     const ext = fileExt(file);
@@ -1226,40 +1353,15 @@
       throw new Error(describeOversize(file));
     }
 
-    const isBinary = ext === ".zip" || ext === ".apkg"
-      || /zip/i.test(file.type || "");
-    const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
-    const url = "/api/convert?format=" + encodeURIComponent(fmt)
-      + "&filename=" + encodeURIComponent(file.name);
-
-    let res;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: file,
-      });
-    } catch (err) {
-      // fetch() rejects (rather than returning a non-2xx response) when the
-      // browser never got an HTTP status back — e.g. the server dropped the
-      // connection mid-upload because the body exceeded its ingress limit,
-      // the process isn't running, or the network blipped. The native
-      // message ("NetworkError when attempting to fetch resource") is
-      // useless, so translate it into something actionable.
-      const hint =
-        file.size > 10 * 1024 * 1024
-          ? " The file is " + formatBytes(file.size)
-            + " — if that exceeds the server's upload limit the connection "
-            + "gets cut before a response is sent. Try a smaller export "
-            + "(File → Export → Current deck, uncheck Include media)."
-          : " Check that the converter is reachable, then try again.";
-      throw new Error("could not reach the converter." + hint);
-    }
+    const useBlob = file.size > RAW_BODY_THRESHOLD;
+    const res = useBlob
+      ? await postConvertBlob(entry, fmt)
+      : await postConvertRaw(entry, fmt);
 
     if (!res.ok) {
-      // Try to surface the server's JSON error first. Vercel's platform
-      // (e.g. 413 for oversize uploads) responds with no JSON body, so we
-      // fall back to a format-specific message rather than a bare status.
+      // Prefer the server's JSON error message when present. Vercel's
+      // platform edge (e.g. a 413 on the raw-body path) responds with no
+      // JSON body, so we fall back to tailored messages by status code.
       let serverMsg = null;
       try {
         const j = await res.json();
@@ -1268,10 +1370,9 @@
       if (serverMsg) throw new Error(serverMsg);
       if (res.status === 413) {
         throw new Error(
-          "too large for the server (" + formatBytes(file.size)
-          + ", platform limit " + MAX_UPLOAD_LABEL + "). Re-export a smaller "
-          + "deck: File → Export → Current deck, and untick Include media "
-          + "if you don't need images."
+          "too large for the raw-body path (" + formatBytes(file.size)
+          + "). This file should have been routed through Blob — if you're "
+          + "seeing this, the Blob upload may have silently downgraded."
         );
       }
       throw new Error("conversion failed (" + res.status + ")");

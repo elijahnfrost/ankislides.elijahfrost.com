@@ -1,0 +1,8 @@
+{
+  "name": "anki-to-slides",
+  "private": true,
+  "description": "Vercel Blob client-upload helper for the Anki → Slides converter. The heavy lifting lives in api/convert.py; this package exists only so the /api/blob-upload edge function can depend on @vercel/blob.",
+  "dependencies": {
+    "@vercel/blob": "^2.0.0"
+  }
+}

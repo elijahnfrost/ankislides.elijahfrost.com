@@ -7,6 +7,11 @@ __pycache__/
 .env.*
 !.env.example
 
+# Node deps for the blob-upload edge function. Vercel installs these at
+# build time from package.json / package-lock.json; we never commit the
+# resolved tree.
+node_modules/
+
 # Local user artifacts — the CLI writes here, but we don't want to ship decks.
 export/
 import/
