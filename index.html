@@ -1297,7 +1297,12 @@
     let blob;
     try {
       blob = await upload(file.name, file, {
-        access: "public",
+        // Must match the Blob store's access mode in the Vercel dashboard.
+        // The store here is Private — blob URLs 404 without a Bearer token,
+        // which /api/convert supplies from the BLOB_READ_WRITE_TOKEN env
+        // var when fetching. Good fit for transient user uploads: random
+        // pathname AND auth-gated reads.
+        access: "private",
         handleUploadUrl: "/api/blob-upload",
         contentType: file.type || "application/octet-stream",
         onUploadProgress: (ev) => {

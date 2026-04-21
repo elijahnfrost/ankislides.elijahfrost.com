@@ -84,10 +84,19 @@ MAX_BLOB_BYTES = 100 * 1024 * 1024  # 100 MB — mirrors api/blob-upload.js
 # Whitelist of hosts we'll blob-fetch from. Prevents the endpoint from
 # being used as a generic "fetch-anything" proxy: if someone POSTs a
 # `blobUrl` pointing at, say, an internal metadata service, we refuse.
-# Vercel Blob URLs end in `.vercel-storage.com` (public store URLs look
-# like `<id>.public.blob.vercel-storage.com`).
+# Vercel Blob URLs end in `.vercel-storage.com` — public store URLs look
+# like `<id>.public.blob.vercel-storage.com`, private ones like
+# `<id>.blob.vercel-storage.com`. The suffix check covers both.
 _BLOB_HOST_SUFFIX = ".vercel-storage.com"
 _BLOB_FETCH_TIMEOUT = 25  # seconds — well under the 60 s function timeout
+
+# Private Blob stores serve URLs that 404 without an Authorization header.
+# Vercel injects the store's read/write token into the function's
+# environment when a Blob store is connected to the project — we pass it
+# through as a Bearer token. Public stores don't need this (the header is
+# harmless on them), so reading the env var lazily keeps local/public
+# setups working without any config.
+_BLOB_READ_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
@@ -416,9 +425,22 @@ def _fetch_blob_bytes(blob_url: str) -> bytes:
         )
 
     req = urllib.request.Request(blob_url, method="GET")
+    if _BLOB_READ_TOKEN:
+        req.add_header("Authorization", f"Bearer {_BLOB_READ_TOKEN}")
     try:
         resp = urllib.request.urlopen(req, timeout=_BLOB_FETCH_TIMEOUT)
     except urllib.error.HTTPError as exc:
+        # 401/403 on a private store almost always means the function's
+        # BLOB_READ_WRITE_TOKEN isn't set — surface that specifically so
+        # deploy-time misconfig is obvious from the client error message.
+        if exc.code in (401, 403):
+            hint = (
+                "blob storage rejected our credentials (HTTP "
+                f"{exc.code}). If your Blob store is Private, make sure "
+                "the store is connected to this Vercel project so "
+                "BLOB_READ_WRITE_TOKEN is injected, then redeploy."
+            )
+            raise ValueError(hint) from exc
         raise ValueError(
             f"blobUrl returned HTTP {exc.code} — the upload may have "
             f"expired or been deleted"
