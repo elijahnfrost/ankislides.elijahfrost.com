@@ -8,20 +8,24 @@
 // function then fetches the blob by URL — a function outbound fetch has no
 // size cap.
 //
-// Runs on the default Node.js runtime. We originally tried the Edge
-// runtime for faster cold starts, but `@vercel/blob/client`'s
-// `handleUpload` pulls in undici + node: built-ins (stream, crypto, tls,
-// …) which Edge Functions disallow, so deployment failed with
-// "unsupported modules". Node runtime has no such restriction. Cold-start
-// cost is a non-issue here: this endpoint is called once per upload, for
-// a handshake that's much cheaper than the conversion itself.
+// Runtime: default Node.js serverless (NOT Edge — `@vercel/blob/client`
+// transitively pulls in undici + node: built-ins that Edge Functions
+// disallow).
+//
+// Module format: **CommonJS** on purpose. We previously wrote this file
+// with ESM `import` syntax, which triggered Vercel's auto-compile to CJS
+// and produced a FUNCTION_INVOCATION_FAILED at cold start — the
+// transform was mangling the deeper require() chain into
+// `@vercel/blob/client`'s CJS entry (which itself requires undici +
+// crypto). Writing the handler as native CJS skips the transform
+// entirely and the module graph resolves cleanly.
 //
 // Setup requirement: the Vercel project must have a Blob store connected
 // (Project → Storage → Create → Blob → Connect). That provisioning
 // auto-injects `BLOB_READ_WRITE_TOKEN` into the function environment.
 // Without it, `handleUpload` throws "No token found" and we return a 400
 // with that message intact.
-import { handleUpload } from "@vercel/blob/client";
+const { handleUpload } = require("@vercel/blob/client");
 
 // The Anki → Slides pipeline accepts .apkg (SQLite bundle), .zip (txt + media),
 // and .txt (plain export). Allowing the generic octet-stream covers browsers
@@ -52,7 +56,7 @@ async function parseBody(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   if (request.method !== "POST") {
     response.status(405).json({ error: "method not allowed" });
     return;
@@ -88,7 +92,7 @@ export default async function handler(request, response) {
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname /*, clientPayload */) => {
+      onBeforeGenerateToken: async (_pathname /*, clientPayload */) => {
         // This is a public converter — no user sessions to check. Protection
         // is reduced to: tight content-type allowlist, hard size cap, and
         // `addRandomSuffix` so pathnames can't be guessed or collided.
@@ -117,4 +121,4 @@ export default async function handler(request, response) {
       name: error && error.name ? error.name : undefined,
     });
   }
-}
+};
