@@ -388,7 +388,8 @@
     .file-row[data-state="error"] .state { color: var(--color-error-text); }
     .file-row[data-state="converting"] .state,
     .file-row[data-state="uploading"] .state { color: var(--color-fg); }
-    .file-row button.remove {
+    .file-row button.remove,
+    .file-row button.cancel {
       background: transparent;
       border: 1px solid var(--color-border);
       color: var(--color-fg-soft);
@@ -407,6 +408,14 @@
     .file-row button.remove:disabled {
       opacity: 0.4;
       cursor: not-allowed;
+    }
+    .file-row button.cancel {
+      color: var(--color-error-text);
+      border-color: var(--color-error-text);
+    }
+    .file-row button.cancel:hover {
+      background: var(--color-error-text);
+      color: var(--color-bg);
     }
     .file-list .toolbar {
       display: flex;
@@ -1111,6 +1120,29 @@
     renderList();
   }
 
+  // Abort an entry's in-flight operation (upload XHR or convert fetch)
+  // and drop it from the queue. Used as the per-row cancel button during
+  // an active batch — user chose the wrong file, wants it gone without
+  // waiting for the upload to finish.
+  //
+  // Safe to call on a pending (not-yet-started) entry too: no XHR to
+  // abort, just splice it out before the submit loop gets there.
+  function cancelEntry(id) {
+    const entry = entries.find((e) => e.id === id);
+    if (!entry) return;
+    if (entry._xhr) {
+      try { entry._xhr.abort(); } catch (_) {}
+      entry._xhr = null;
+    }
+    if (entry._fetchController) {
+      try { entry._fetchController.abort(); } catch (_) {}
+      entry._fetchController = null;
+    }
+    const idx = entries.findIndex((e) => e.id === id);
+    if (idx >= 0) entries.splice(idx, 1);
+    renderList();
+  }
+
   function clearAll() {
     if (converting) return;
     entries.length = 0;
@@ -1171,17 +1203,31 @@
       state.className = "state";
       state.textContent = stateLabel(e);
 
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "remove";
-      remove.textContent = "remove";
-      remove.setAttribute("aria-label", "Remove " + e.file.name);
-      remove.disabled = converting;
-      remove.addEventListener("click", () => removeEntry(e.id));
+      // During a live batch, pending/in-flight rows get a "cancel" button
+      // that aborts and removes the entry. Done/error rows keep "remove"
+      // but disabled (user clicks Clear All or waits for batch to finish).
+      // When idle, every row shows "remove", enabled.
+      const inFlight = e.state === "uploading" || e.state === "converting";
+      const canCancel = converting && (inFlight || e.state === "pending");
+
+      const action = document.createElement("button");
+      action.type = "button";
+      if (canCancel) {
+        action.className = "cancel";
+        action.textContent = "cancel";
+        action.setAttribute("aria-label", "Cancel " + e.file.name);
+        action.addEventListener("click", () => cancelEntry(e.id));
+      } else {
+        action.className = "remove";
+        action.textContent = "remove";
+        action.setAttribute("aria-label", "Remove " + e.file.name);
+        action.disabled = converting;
+        action.addEventListener("click", () => removeEntry(e.id));
+      }
 
       row.appendChild(info);
       row.appendChild(state);
-      row.appendChild(remove);
+      row.appendChild(action);
       fileList.appendChild(row);
     }
 
@@ -1288,7 +1334,7 @@
     return data.clientToken;
   }
 
-  function uploadToBlob(file, { onUploadProgress } = {}) {
+  function uploadToBlob(file, { onUploadProgress, registerXhr } = {}) {
     return new Promise(async (resolve, reject) => {
       let clientToken;
       try {
@@ -1360,11 +1406,25 @@
         reject(new Error("network error during upload"));
       });
       xhr.addEventListener("abort", () => {
-        reject(new Error("upload aborted"));
+        const err = new Error("cancelled");
+        err.aborted = true;
+        reject(err);
       });
 
+      if (typeof registerXhr === "function") registerXhr(xhr);
       xhr.send(file);
     });
+  }
+
+  // Thrown whenever the user cancels an in-flight op. Distinct error so
+  // callers can distinguish "user bailed" from "real failure" and skip the
+  // retry-message branches.
+  class CancelledError extends Error {
+    constructor() {
+      super("cancelled");
+      this.name = "CancelledError";
+      this.cancelled = true;
+    }
   }
 
   async function postConvertRaw(entry, fmt) {
@@ -1375,13 +1435,25 @@
     const contentType = isBinary ? "application/octet-stream" : "text/plain; charset=utf-8";
     const url = "/api/convert?format=" + encodeURIComponent(fmt)
       + "&filename=" + encodeURIComponent(file.name);
+
+    entry.state = "uploading";
+    entry.progress = undefined;
+    renderList();
+
+    const controller = new AbortController();
+    entry._fetchController = controller;
     try {
-      return await fetch(url, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": contentType },
         body: file,
+        signal: controller.signal,
       });
+      entry._fetchController = null;
+      return res;
     } catch (err) {
+      entry._fetchController = null;
+      if (err && err.name === "AbortError") throw new CancelledError();
       // fetch() rejects (rather than returning a non-2xx response) when the
       // browser never got an HTTP status back — server dropped the
       // connection mid-upload, process isn't running, or the network
@@ -1396,30 +1468,41 @@
   async function postConvertBlob(entry, fmt) {
     const file = entry.file;
 
-    entry.state = "uploading";
-    entry.progress = 0;
-    renderList();
+    // If this entry has already been uploaded (e.g. user converted it to
+    // PDF and is now asking for PNG of the same file), skip straight to
+    // the convert step. Public blobs live on the store indefinitely, so
+    // the cached URL stays valid for the session.
+    if (!entry.blobUrl) {
+      entry.state = "uploading";
+      entry.progress = 0;
+      renderList();
 
-    let blob;
-    try {
-      blob = await uploadToBlob(file, {
-        onUploadProgress: (ev) => {
-          if (!ev || typeof ev.percentage !== "number") return;
-          entry.progress = Math.floor(ev.percentage);
-          renderList();
-        },
-      });
-    } catch (err) {
-      const raw = (err && err.message) ? err.message : String(err);
-      if (typeof console !== "undefined") console.error("Blob upload failed", err);
-      if (/BLOB_READ_WRITE_TOKEN|No token found/i.test(raw)) {
-        throw new Error(
-          "Vercel Blob isn't set up on this project. In your Vercel "
-          + "dashboard: Project \u2192 Storage \u2192 Create \u2192 Blob \u2192 "
-          + "Connect. Redeploy, then retry."
-        );
+      let blob;
+      try {
+        blob = await uploadToBlob(file, {
+          onUploadProgress: (ev) => {
+            if (!ev || typeof ev.percentage !== "number") return;
+            entry.progress = Math.floor(ev.percentage);
+            renderList();
+          },
+          registerXhr: (xhr) => { entry._xhr = xhr; },
+        });
+      } catch (err) {
+        entry._xhr = null;
+        if (err && err.aborted) throw new CancelledError();
+        const raw = (err && err.message) ? err.message : String(err);
+        if (typeof console !== "undefined") console.error("Blob upload failed", err);
+        if (/BLOB_READ_WRITE_TOKEN|No token found/i.test(raw)) {
+          throw new Error(
+            "Vercel Blob isn't set up on this project. In your Vercel "
+            + "dashboard: Project \u2192 Storage \u2192 Create \u2192 Blob \u2192 "
+            + "Connect. Redeploy, then retry."
+          );
+        }
+        throw new Error("upload to Blob failed — " + raw);
       }
-      throw new Error("upload to Blob failed — " + raw);
+      entry._xhr = null;
+      entry.blobUrl = blob.url;
     }
 
     entry.state = "converting";
@@ -1427,13 +1510,20 @@
     renderList();
 
     const url = "/api/convert?format=" + encodeURIComponent(fmt);
+    const controller = new AbortController();
+    entry._fetchController = controller;
     try {
-      return await fetch(url, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blobUrl: blob.url, filename: file.name }),
+        body: JSON.stringify({ blobUrl: entry.blobUrl, filename: file.name }),
+        signal: controller.signal,
       });
+      entry._fetchController = null;
+      return res;
     } catch (err) {
+      entry._fetchController = null;
+      if (err && err.name === "AbortError") throw new CancelledError();
       throw new Error(
         "upload succeeded but the converter didn't respond. Retry in a "
         + "moment — your file is still in Blob storage."
@@ -1516,12 +1606,20 @@
 
     let done = 0;
     let failed = 0;
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
+    let cancelled = 0;
+    // Iterate by id, not index — cancelEntry() splices the list, so
+    // indices shift under us. We snapshot the ids up front; any entry
+    // still in the list when its turn comes gets converted.
+    const initialIds = entries.map((e) => e.id);
+    for (let i = 0; i < initialIds.length; i++) {
+      const id = initialIds[i];
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) { cancelled += 1; continue; } // user cancelled before we got here
       entry.state = "converting";
       renderList();
+      const position = entries.findIndex((e) => e.id === id) + 1;
       setStatus(
-        '<span class="spinner"></span>Converting ' + (i + 1) + " of "
+        '<span class="spinner"></span>Converting ' + position + " of "
         + entries.length + " — " + entry.file.name + "…"
       );
       try {
@@ -1530,33 +1628,46 @@
         entry.message = summary;
         done += 1;
       } catch (err) {
-        entry.state = "error";
-        entry.message = err && err.message ? err.message : String(err);
-        failed += 1;
+        if (err && err.cancelled) {
+          // Entry has already been spliced by cancelEntry(); nothing to
+          // mark. Just tick the cancelled counter so the summary line
+          // distinguishes it from real failures.
+          cancelled += 1;
+        } else {
+          entry.state = "error";
+          entry.message = err && err.message ? err.message : String(err);
+          failed += 1;
+        }
       }
       renderList();
-      if (i + 1 < entries.length) await new Promise((r) => setTimeout(r, 250));
+      if (i + 1 < initialIds.length) await new Promise((r) => setTimeout(r, 250));
     }
 
     converting = false;
     submit.disabled = entries.length === 0;
     renderList();
 
-    if (failed === 0) {
+    const cancelBlurb = cancelled > 0
+      ? " (" + cancelled + " cancelled)"
+      : "";
+    if (done === 0 && failed === 0 && cancelled > 0) {
+      setStatus("Cancelled", "");
+    } else if (failed === 0) {
       setStatus(
-        "Done — " + done + " file" + (done === 1 ? "" : "s") + " converted",
+        "Done — " + done + " file" + (done === 1 ? "" : "s") + " converted"
+        + cancelBlurb,
         "success"
       );
     } else if (done === 0) {
       setStatus(
         "All " + failed + " file" + (failed === 1 ? "" : "s")
-        + " failed — see details above",
+        + " failed — see details above" + cancelBlurb,
         "error"
       );
     } else {
       setStatus(
         done + " of " + (done + failed) + " converted — "
-        + failed + " failed, see details above",
+        + failed + " failed, see details above" + cancelBlurb,
         "error"
       );
     }

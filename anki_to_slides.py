@@ -59,8 +59,12 @@ MAX_FONT_PT = 54
 MIN_FONT_PT = 10
 LINE_HEIGHT_FACTOR = 1.25
 
-# PNG rasterization resolution.
-PNG_DPI = 144
+# PNG rasterization resolution. A 13.33"×7.5" widescreen slide at 240 DPI
+# renders to 3200×1800 px — sharp on Retina/HiDPI displays where a 1920-wide
+# image otherwise shows at half size and reads as microscopic. Zip size
+# roughly doubles vs. the old 144 DPI; acceptable for a format whose whole
+# point is "each card as its own shareable image."
+PNG_DPI = 240
 
 DEFAULT_IMPORT_DIR = Path("import")
 DEFAULT_EXPORT_DIR = Path("export")
