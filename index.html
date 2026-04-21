@@ -1313,17 +1313,22 @@
       });
     } catch (err) {
       const raw = (err && err.message) ? err.message : String(err);
-      // The most common cause: no Blob store connected to the project, so
-      // /api/blob-upload can't mint a token. Detect the marker strings the
-      // SDK/server surface and give the operator a concrete fix.
-      if (/BLOB_READ_WRITE_TOKEN|No token found|Vercel Blob/i.test(raw)) {
+      // Log the full SDK error to the console so we never hide useful
+      // debugging context behind a friendlier UI message.
+      if (typeof console !== "undefined") console.error("Blob upload failed", err);
+      // Detect the genuinely-unconfigured case narrowly. The @vercel/blob
+      // SDK namespaces nearly every error with the literal prefix "Vercel
+      // Blob:" so a broad match here would wrongly claim "not set up" for
+      // totally unrelated failures (access mismatch, 400s, CORS, etc.).
+      // Only these two phrases uniquely identify "no token in env".
+      if (/BLOB_READ_WRITE_TOKEN|No token found/i.test(raw)) {
         throw new Error(
           "Vercel Blob isn't set up on this project. In your Vercel "
           + "dashboard: Project \u2192 Storage \u2192 Create \u2192 Blob \u2192 "
           + "Connect. Redeploy, then retry."
         );
       }
-      throw new Error("upload to Blob failed: " + raw);
+      throw new Error("upload to Blob failed — " + raw);
     }
 
     entry.state = "converting";
