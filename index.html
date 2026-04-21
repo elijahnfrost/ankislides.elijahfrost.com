@@ -190,30 +190,51 @@
 
     /* ----------------------------------------------------------------------
      * Page frame
+     *
+     * `main` is a thin wrapper. All vertical rhythm lives inside `.screen`
+     * and `.reference`. `.screen` is the first thing you see — it claims a
+     * full viewport height and vertically centers the hero + form so the
+     * title and call-to-action land in the middle of the window, not
+     * anchored at the top with 40% whitespace below. The reference block
+     * sits outside the screen so it's only reached by scrolling.
      * -------------------------------------------------------------------- */
     main {
-      max-width: 1120px;
+      max-width: 760px;
       margin: 0 auto;
-      padding: 72px 20px 80px;
+      padding: 0 20px 80px;
     }
     @media (min-width: 640px) {
-      main { padding: 96px 40px 120px; }
+      main { padding: 0 40px 120px; }
+    }
+
+    .screen {
+      /* 100dvh respects the dynamic viewport (mobile address bar chrome);
+       * 100vh is the safe fallback for older engines. */
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      /* Breathing room from top/bottom of viewport so the content isn't
+       * crammed up against the theme toggle or the viewport edge on very
+       * short windows. */
+      padding: 72px 0 40px;
     }
 
     /* ----- Hero ----- */
     .hero {
-      padding: 24px 0 56px;
-      border-bottom: 1px solid var(--color-border-section);
-      margin-bottom: 56px;
+      padding: 24px 0 64px;
+      margin-bottom: 64px;
       position: relative;
+      text-align: center;
     }
     @media (min-width: 640px) {
-      .hero { padding: 32px 0 72px; margin-bottom: 72px; }
+      .hero { padding: 32px 0 88px; margin-bottom: 88px; }
     }
 
     .hero .eyebrow {
-      font-size: 10px;
-      letter-spacing: 0.28em;
+      font-size: 11px;
+      letter-spacing: 0.2em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
       margin-bottom: 28px;
@@ -224,7 +245,7 @@
       letter-spacing: -0.01em;
       line-height: 1.02;
       font-size: clamp(54px, 10vw, 120px);
-      margin: 0 0 28px;
+      margin: 0 0 32px;
       color: var(--color-fg);
     }
     .hero h1 em {
@@ -243,21 +264,22 @@
       letter-spacing: 0;
     }
     .hero .lede {
-      max-width: 56ch;
+      max-width: 60ch;
+      margin: 0 auto;
       color: var(--color-fg-body);
-      font-size: 15px;
-      line-height: 1.65;
+      font-size: 16px;
+      line-height: 1.7;
     }
     @media (min-width: 640px) {
-      .hero .lede { font-size: 16px; }
+      .hero .lede { font-size: 17px; }
     }
     .hero .meta {
       margin-top: 28px;
       display: flex;
       flex-wrap: wrap;
       gap: 10px 22px;
-      font-size: 10px;
-      letter-spacing: 0.22em;
+      font-size: 11px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
     }
@@ -270,36 +292,28 @@
       vertical-align: 3px;
     }
 
-    /* ----- Two-column layout ----- */
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 320px;
-      gap: 56px;
-      align-items: start;
-    }
-    @media (max-width: 960px) {
-      .layout { grid-template-columns: 1fr; gap: 48px; }
-    }
+    /* ----- Single-column layout ----- */
+    .layout { display: block; }
 
     /* ----- Section heading (numbered) ----- */
     .step {
       display: flex;
       align-items: baseline;
-      gap: 16px;
-      margin-bottom: 16px;
+      gap: 18px;
+      margin-bottom: 20px;
     }
     .step .num {
       font-family: var(--font-cormorant);
       font-weight: 300;
       font-style: italic;
-      font-size: 28px;
+      font-size: 32px;
       color: var(--color-numeral);
       line-height: 1;
       flex-shrink: 0;
     }
     .step .label {
-      font-size: 10px;
-      letter-spacing: 0.28em;
+      font-size: 11.5px;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
       color: var(--color-fg-soft);
     }
@@ -309,7 +323,7 @@
       display: block;
       border: 1px solid var(--color-border-section);
       background: transparent;
-      padding: 44px 24px;
+      padding: 56px 28px;
       text-align: center;
       cursor: pointer;
       transition: border-color 120ms linear, background-color 120ms linear;
@@ -322,21 +336,21 @@
     .drop .title {
       font-family: var(--font-cormorant);
       font-weight: 300;
-      font-size: 22px;
+      font-size: 26px;
       color: var(--color-fg);
-      margin-bottom: 6px;
+      margin-bottom: 10px;
     }
     .drop .title em { font-style: italic; color: var(--color-fg-muted); }
     .drop .hint {
       color: var(--color-fg-body);
-      font-size: 12px;
-      line-height: 1.65;
-      max-width: 48ch;
+      font-size: 13.5px;
+      line-height: 1.75;
+      max-width: 52ch;
       margin: 0 auto;
     }
     .drop .hint code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
+      font-size: 12px;
       padding: 1px 6px;
       color: var(--color-fg);
       background: color-mix(in srgb, var(--color-fg) 5%, transparent);
@@ -356,10 +370,10 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto auto;
       align-items: center;
-      gap: 16px;
-      padding: 14px 18px;
+      gap: 18px;
+      padding: 16px 20px;
       border-top: 1px solid var(--color-border-divider);
-      font-size: 13px;
+      font-size: 14px;
     }
     .file-row:first-child { border-top: 0; }
     .file-row .info { min-width: 0; }
@@ -372,14 +386,14 @@
     }
     .file-row .meta {
       color: var(--color-fg-dim);
-      font-size: 10px;
-      letter-spacing: 0.18em;
+      font-size: 11px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      margin-top: 4px;
+      margin-top: 5px;
     }
     .file-row .state {
-      font-size: 10px;
-      letter-spacing: 0.18em;
+      font-size: 11px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--color-fg-muted);
       white-space: nowrap;
@@ -393,9 +407,9 @@
       background: transparent;
       border: 1px solid var(--color-border);
       color: var(--color-fg-soft);
-      padding: 6px 12px;
-      font-size: 9px;
-      letter-spacing: 0.2em;
+      padding: 7px 13px;
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
       cursor: pointer;
       font-family: inherit;
@@ -422,10 +436,10 @@
       justify-content: space-between;
       align-items: center;
       gap: 12px;
-      padding: 12px 18px;
+      padding: 14px 20px;
       border-top: 1px solid var(--color-border-divider);
-      font-size: 10px;
-      letter-spacing: 0.18em;
+      font-size: 11px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
     }
@@ -433,9 +447,9 @@
       background: transparent;
       border: 1px solid var(--color-border);
       color: var(--color-fg-soft);
-      padding: 5px 12px;
-      font-size: 9px;
-      letter-spacing: 0.2em;
+      padding: 6px 13px;
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
       cursor: pointer;
       font-family: inherit;
@@ -448,7 +462,7 @@
     .file-list .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* ----- Format selector ----- */
-    .formats-wrap { margin-top: 48px; }
+    .formats-wrap { margin-top: 56px; }
     .formats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -458,7 +472,7 @@
     }
     .fmt {
       border-right: 1px solid var(--color-border-section);
-      padding: 20px 16px;
+      padding: 24px 20px;
       text-align: left;
       cursor: pointer;
       background: transparent;
@@ -479,42 +493,42 @@
       background: var(--color-fg);
     }
     .fmt .fmt-label {
-      font-size: 9px;
-      letter-spacing: 0.22em;
+      font-size: 10.5px;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
-      margin-bottom: 10px;
+      margin-bottom: 12px;
     }
     .fmt .fmt-title {
       font-family: var(--font-cormorant);
       font-weight: 400;
-      font-size: 22px;
+      font-size: 24px;
       color: var(--color-fg);
       line-height: 1.1;
     }
     .fmt.active .fmt-title { color: var(--color-fg-bright); }
     .fmt .fmt-sub {
-      font-size: 11px;
+      font-size: 12px;
       color: var(--color-fg-body);
-      margin-top: 4px;
+      margin-top: 6px;
     }
     .fmt input { display: none; }
 
     /* ----- Submit button (outline recipe) ----- */
     button.primary {
-      margin-top: 40px;
+      margin-top: 48px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
+      gap: 12px;
       width: 100%;
-      min-height: 44px;
-      padding: 14px 28px;
+      min-height: 48px;
+      padding: 16px 28px;
       border: 1px solid var(--color-border);
       background: transparent;
       font-family: inherit;
-      font-size: 10px;
-      letter-spacing: 0.22em;
+      font-size: 11.5px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
       color: var(--color-fg-soft);
       cursor: pointer;
@@ -538,9 +552,9 @@
     }
 
     .status {
-      margin-top: 18px;
-      font-size: 11px;
-      letter-spacing: 0.18em;
+      margin-top: 20px;
+      font-size: 12px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--color-fg-muted);
       min-height: 1.2em;
@@ -548,173 +562,110 @@
     .status.error { color: var(--color-error-text); }
     .status.success { color: var(--color-success-text); }
 
-    /* ----- Help / details ----- */
-    details.help {
-      margin-top: 20px;
-      border-top: 1px solid var(--color-border-divider);
-      padding-top: 18px;
-      color: var(--color-fg-body);
-      font-size: 13px;
-      line-height: 1.7;
+    /* ----- Reference block (bottom of page) -----
+     * Replaces the old sidebar + two help accordions. Everything lives
+     * here now: the input-format matrix, the "always dropped" list, and
+     * the "preserved" paragraph. Sits below the form on its own, marked
+     * off by a top divider so it reads as a footer-ish info panel, not
+     * another interactive step.
+     * -------------------------------------------------------------- */
+    .reference {
+      margin-top: 112px;
     }
-    details.help summary {
-      cursor: pointer;
-      color: var(--color-fg-soft);
-      font-size: 10px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      padding: 0;
-      list-style: none;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      transition: color 120ms linear;
-    }
-    details.help summary:hover { color: var(--color-fg); }
-    details.help summary::-webkit-details-marker { display: none; }
-    details.help summary::before {
-      content: "+";
-      font-family: var(--font-cormorant);
-      font-size: 20px;
-      line-height: 0;
-      color: var(--color-fg-dim);
-      transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
-      display: inline-block;
-      width: 12px;
-    }
-    details.help[open] summary::before {
-      content: "−";
-    }
-    details.help[open] { padding-bottom: 6px; }
-    details.help[open] summary { margin-bottom: 14px; color: var(--color-fg); }
-    details.help p { margin: 8px 0; color: var(--color-fg-body); }
-    details.help ol, details.help ul { padding-left: 20px; margin: 8px 0; }
-    details.help li { margin-bottom: 6px; color: var(--color-fg-body); }
-    details.help strong { color: var(--color-fg); font-weight: 500; }
-    details.help code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11.5px;
-      padding: 1px 6px;
-      color: var(--color-fg);
-      background: color-mix(in srgb, var(--color-fg) 5%, transparent);
-      border: 1px solid var(--color-border-divider);
-    }
-
-    table.compat {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 14px 0 6px;
-      font-size: 12.5px;
-    }
-    table.compat th, table.compat td {
-      border-bottom: 1px solid var(--color-border-divider);
-      padding: 10px 10px 10px 0;
-      text-align: left;
-      vertical-align: top;
-      color: var(--color-fg-body);
-    }
-    table.compat th {
-      color: var(--color-fg-dim);
-      font-weight: 500;
-      font-size: 9px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      padding-bottom: 10px;
-      border-bottom-color: var(--color-border);
-    }
-    table.compat td.good { color: var(--color-fg); }
-    table.compat td.bad { color: var(--color-error-text); }
-    table.compat tr:last-child th,
-    table.compat tr:last-child td { border-bottom: 0; }
-
-    /* ----- Sidebar ----- */
-    aside.sidebar {
-      position: sticky;
-      top: 32px;
-      padding: 28px 28px 22px;
-      border: 1px solid var(--color-border-section);
-      background: transparent;
-    }
-    @media (max-width: 960px) {
-      aside.sidebar { position: static; top: auto; }
-    }
-    aside.sidebar h2 {
-      margin: 0 0 20px;
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.28em;
-      text-transform: uppercase;
-      color: var(--color-fg-dim);
-    }
-    aside.sidebar .sub-title {
+    .reference h2 {
       font-family: var(--font-cormorant);
       font-weight: 300;
-      font-size: 22px;
+      font-size: 28px;
       color: var(--color-fg);
+      letter-spacing: -0.005em;
+      margin: 0 0 28px;
       line-height: 1.2;
-      margin-bottom: 16px;
     }
-    aside.sidebar .sub-title em { font-style: italic; color: var(--color-fg-muted); }
+    .reference h2 em { font-style: italic; color: var(--color-fg-muted); }
 
-    aside.sidebar table.ref {
+    .reference table.ref {
       width: 100%;
       border-collapse: collapse;
-      font-size: 12px;
+      /* Fixed so the 3 checkmark columns share equally — stops the
+       * right-hand headers clustering against the right edge. */
+      table-layout: fixed;
+      font-size: 14px;
     }
-    aside.sidebar table.ref th,
-    aside.sidebar table.ref td {
-      padding: 10px 4px;
+    /* First column carries the format name and a short caption. The
+     * remaining 60% splits into three equal check columns. */
+    .reference table.ref col.col-label { width: 40%; }
+    .reference table.ref col.col-check { width: 20%; }
+    .reference table.ref th,
+    .reference table.ref td {
+      padding: 16px 8px;
       border-bottom: 1px solid var(--color-border-divider);
       text-align: center;
       vertical-align: middle;
       color: var(--color-fg-body);
     }
-    aside.sidebar table.ref th:first-child,
-    aside.sidebar table.ref td:first-child {
+    .reference table.ref th:first-child,
+    .reference table.ref td:first-child {
       text-align: left;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       color: var(--color-fg);
-      font-size: 11.5px;
+      padding-left: 0;
     }
-    aside.sidebar table.ref th {
+    .reference table.ref td:first-child {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+    }
+    .reference table.ref th:last-child,
+    .reference table.ref td:last-child {
+      padding-right: 0;
+    }
+    .reference table.ref th {
       font-family: var(--font-inter);
-      font-size: 9px;
+      font-size: 10.5px;
       font-weight: 500;
-      letter-spacing: 0.2em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
       border-bottom-color: var(--color-border);
+      padding-bottom: 14px;
     }
-    aside.sidebar tr:last-child td { border-bottom: 0; }
-    aside.sidebar td .y { color: var(--color-fg); }
-    aside.sidebar td .n { color: var(--color-fg-dim); }
+    .reference table.ref tr:last-child td { border-bottom: 0; }
+    .reference table.ref td .y { color: var(--color-fg); }
+    .reference table.ref td .n { color: var(--color-fg-dim); }
 
-    aside.sidebar .note {
-      margin-top: 22px;
-      padding-top: 18px;
-      border-top: 1px solid var(--color-border-divider);
-      font-size: 11.5px;
-      line-height: 1.7;
+    /* Notes live side-by-side under the table on desktop, stacked on
+     * narrow widths. Same divider style as the table above so the
+     * bottom section reads as one typographic block. */
+    .reference .notes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 56px;
+      margin-top: 48px;
+    }
+    @media (max-width: 560px) {
+      .reference .notes { grid-template-columns: 1fr; gap: 32px; }
+    }
+    .reference .note {
+      font-size: 13.5px;
+      line-height: 1.75;
       color: var(--color-fg-body);
     }
-    aside.sidebar .note .note-label {
-      font-size: 9px;
-      letter-spacing: 0.22em;
+    .reference .note-label {
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
-      margin-bottom: 8px;
+      margin-bottom: 14px;
     }
-    aside.sidebar .drop-list {
-      margin: 4px 0 0;
+    .reference .drop-list {
+      margin: 0;
       padding: 0;
       list-style: none;
     }
-    aside.sidebar .drop-list li {
+    .reference .drop-list li {
       display: flex;
       gap: 12px;
-      padding: 3px 0;
+      padding: 5px 0;
     }
-    aside.sidebar .drop-list li::before {
+    .reference .drop-list li::before {
       content: "";
       display: inline-block;
       width: 3px;
@@ -722,22 +673,13 @@
       border-radius: 50%;
       background: var(--color-bullet);
       flex-shrink: 0;
-      margin-top: 8px;
+      margin-top: 10px;
     }
-    aside.sidebar code {
+    .reference .note p { margin: 0; }
+    .reference code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
+      font-size: 12.5px;
       color: var(--color-fg);
-    }
-
-    kbd {
-      display: inline-block;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 10.5px;
-      padding: 1px 6px;
-      color: var(--color-fg);
-      background: transparent;
-      border: 1px solid var(--color-border);
     }
 
     /* ----- Spinner (aligns with micro-type) ----- */
@@ -774,18 +716,19 @@
 
 <main>
 
-  <section class="hero fade-in-up delay-1">
-    <h1>
-      Anki<span class="arrow">→</span><em>Slides</em>
-    </h1>
-    <p class="lede">
-      Front and back become separate slides, in order. 16:9 output. Nothing is stored.
-    </p>
-  </section>
+  <div class="screen">
+    <section class="hero fade-in-up delay-1">
+      <h1>
+        Anki<span class="arrow">→</span><em>Slides</em>
+      </h1>
+      <p class="lede">
+        Front and back become separate slides, in order. 16:9 output. Nothing is stored.
+      </p>
+    </section>
 
-  <section class="layout">
+    <section class="layout">
 
-    <form id="form" autocomplete="off">
+      <form id="form" autocomplete="off">
 
       <div class="step fade-in-up delay-2">
         <div class="num">01</div>
@@ -842,71 +785,21 @@
       </button>
       <div id="status" class="status" role="status" aria-live="polite"></div>
 
-      <div>
-        <details class="help">
-          <summary>Which Anki export should I use?</summary>
-          <p>Easiest is <strong>Anki Deck Package (.apkg)</strong> &mdash; single file, images bundled. The table at right summarises what survives for each supported input.</p>
-          <table class="compat">
-            <thead>
-              <tr><th>Anki export option</th><th>Supported</th><th>Notes</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Anki Deck Package (.apkg)</strong></td>
-                <td class="good">Yes &mdash; recommended</td>
-                <td>One file, images bundled, nothing to tick. Works for the newest zstd-compressed bundles too.</td>
-              </tr>
-              <tr>
-                <td>Anki Collection Package (.colpkg)</td>
-                <td class="bad">Not accepted</td>
-                <td>That's Anki's full-profile backup &mdash; routinely multiple GB and always includes media you don't want on slides. Use File &rarr; Export &rarr; <strong>Current deck</strong> as <code>.apkg</code> instead.</td>
-              </tr>
-              <tr>
-                <td>Notes in Plain Text (.txt)</td>
-                <td class="good">Yes</td>
-                <td>Text only. To include images, tick <strong>Include HTML and media references</strong> and upload as a zip with <code>collection.media</code>.</td>
-              </tr>
-              <tr>
-                <td>Cards in Plain Text (.txt)</td>
-                <td class="good">Yes</td>
-                <td>Same shape as Notes, one row per card rather than per note.</td>
-              </tr>
-              <tr>
-                <td>PDF / HTML exporter (add-on)</td>
-                <td class="bad">Output only</td>
-                <td>Those are result formats, not inputs.</td>
-              </tr>
-            </tbody>
-          </table>
-        </details>
+      </form>
 
-        <details class="help">
-          <summary>Using a .txt export with images</summary>
-          <ol>
-            <li>In Anki: <kbd>File</kbd> &rarr; <kbd>Export&hellip;</kbd> &rarr; <strong>Notes in Plain Text (.txt)</strong>.</li>
-            <li>Tick <strong>Include HTML and media references</strong>. Without this the <code>&lt;img&gt;</code> tags never make it into the file, so the images can't be matched later.</li>
-            <li>Leave &ldquo;Include tags&rdquo; and &ldquo;Include deck name&rdquo; off &mdash; they clutter the slides.</li>
-            <li>
-              Find your media folder &mdash; <kbd>Tools</kbd> &rarr; <kbd>Check Media&hellip;</kbd> shows the path. Defaults:
-              <ul>
-                <li>macOS: <code>~/Library/Application Support/Anki2/&lt;profile&gt;/collection.media</code></li>
-                <li>Windows: <code>%APPDATA%\Anki2\&lt;profile&gt;\collection.media</code></li>
-                <li>Linux: <code>~/.local/share/Anki2/&lt;profile&gt;/collection.media</code></li>
-              </ul>
-            </li>
-            <li>Select the <code>.txt</code> and the <code>collection.media</code> folder, right-click &rarr; <strong>Compress</strong>. Drop the resulting <code>.zip</code>.</li>
-          </ol>
-          <p>Or skip all of this and export an <code>.apkg</code> instead &mdash; it already contains everything.</p>
-        </details>
-      </div>
+    </section>
+  </div>
 
-    </form>
+  <section class="reference fade-in-up delay-4" aria-label="Format reference">
+    <h2>What's <em>included</em></h2>
 
-    <aside class="sidebar fade-in-up delay-4" aria-label="Format quick reference">
-      <h2>What's included</h2>
-      <div class="sub-title">By <em>input format</em></div>
-
-      <table class="ref">
+    <table class="ref">
+        <colgroup>
+          <col class="col-label" />
+          <col class="col-check" />
+          <col class="col-check" />
+          <col class="col-check" />
+        </colgroup>
         <thead>
           <tr>
             <th></th>
@@ -937,22 +830,22 @@
         </tbody>
       </table>
 
-      <div class="note">
-        <div class="note-label">Always dropped</div>
-        <ul class="drop-list">
-          <li>Bold, italic, colours, custom fonts</li>
-          <li>Audio &amp; video (<code>[sound:&hellip;]</code>)</li>
-          <li>MathJax / LaTeX stays as raw source</li>
-          <li>Tags, deck name, scheduling</li>
-        </ul>
-      </div>
+      <div class="notes">
+        <div class="note">
+          <div class="note-label">Always dropped</div>
+          <ul class="drop-list">
+            <li>Bold, italic, colours, custom fonts</li>
+            <li>Audio &amp; video (<code>[sound:&hellip;]</code>)</li>
+            <li>MathJax / LaTeX stays as raw source</li>
+            <li>Tags, deck name, scheduling</li>
+          </ul>
+        </div>
 
       <div class="note">
         <div class="note-label">Preserved</div>
-        <p style="margin:0">Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved.</p>
+        <p>Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved.</p>
       </div>
-    </aside>
-
+    </div>
   </section>
 
 </main>
