@@ -208,24 +208,56 @@ def load_font(size_px: int) -> ImageFont.ImageFont:
     return ImageFont.truetype(path, max(1, int(size_px)))
 
 
-def _measure(font: ImageFont.ImageFont, text: str) -> int:
+# ReportLab is the source of truth for PDF (and PPTX) text width; we must wrap
+# lines using the same metrics as drawCentredString, otherwise PIL can measure
+# a line as “fitting” while the PDF font is wider and the rendered line clips
+# on both sides (a centered fragment of the sentence is all that remains).
+_cached_pdf_font_name: Optional[str] = None
+
+
+def _ensure_pdf_font() -> str:
+    """Register the deck TTF with ReportLab (once) and return the font name."""
+    global _cached_pdf_font_name
+    if _cached_pdf_font_name is not None:
+        return _cached_pdf_font_name
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    ttf_path = _find_font_path()
+    if ttf_path and ttf_path.lower().endswith(".ttf"):
+        try:
+            pdfmetrics.registerFont(TTFont("DeckFont", ttf_path))
+            _cached_pdf_font_name = "DeckFont"
+        except Exception as exc:
+            print(
+                f"warning: falling back to Helvetica for layout/PDF ({exc})",
+                file=sys.stderr,
+            )
+            _cached_pdf_font_name = "Helvetica"
+    else:
+        _cached_pdf_font_name = "Helvetica"
+    return _cached_pdf_font_name
+
+
+def _string_width_pt(text: str, size_pt: int) -> float:
     if not text:
-        return 0
-    bbox = font.getbbox(text)
-    return bbox[2] - bbox[0]
+        return 0.0
+    from reportlab.pdfbase import pdfmetrics
+
+    return float(pdfmetrics.stringWidth(text, _ensure_pdf_font(), size_pt))
 
 
 # ---------------------------------------------------------------------------
 # Text layout: wrap + shrink-to-fit
 # ---------------------------------------------------------------------------
-def _wrap_paragraph(paragraph: str, font: ImageFont.ImageFont, max_w_px: int) -> List[str]:
+def _wrap_paragraph(paragraph: str, size_pt: int, max_w_pt: float) -> List[str]:
     if not paragraph:
         return [""]
     lines: List[str] = []
     current = ""
     for word in paragraph.split(" "):
         trial = word if not current else f"{current} {word}"
-        if _measure(font, trial) <= max_w_px:
+        if _string_width_pt(trial, size_pt) <= max_w_pt:
             current = trial
             continue
 
@@ -233,13 +265,13 @@ def _wrap_paragraph(paragraph: str, font: ImageFont.ImageFont, max_w_px: int) ->
             lines.append(current)
             current = ""
 
-        if _measure(font, word) <= max_w_px:
+        if _string_width_pt(word, size_pt) <= max_w_pt:
             current = word
             continue
 
         piece = ""
         for ch in word:
-            if _measure(font, piece + ch) > max_w_px and piece:
+            if _string_width_pt(piece + ch, size_pt) > max_w_pt and piece:
                 lines.append(piece)
                 piece = ch
             else:
@@ -255,23 +287,23 @@ def fit_text(text: str, width_in: float, height_in: float) -> Tuple[int, List[st
     if not text:
         return MAX_FONT_PT, []
 
-    # We fit at 72 DPI, so points map 1:1 to pixels.
-    width_px = width_in * 72.0
-    height_px = height_in * 72.0
+    # One PDF point = 1/72" — use the same unit for wrap checks and for height.
+    _ensure_pdf_font()
+    max_w_pt = width_in * 72.0
+    height_pt = height_in * 72.0
     paragraphs = text.split("\n")
 
-    def _layout_at(size_pt: int) -> Tuple[List[str], float, int]:
-        font = load_font(size_pt)
+    def _layout_at(size_pt: int) -> Tuple[List[str], float, float]:
         lines: List[str] = []
         for para in paragraphs:
-            lines.extend(_wrap_paragraph(para, font, int(width_px)))
+            lines.extend(_wrap_paragraph(para, size_pt, max_w_pt))
         total_h = size_pt * LINE_HEIGHT_FACTOR * len(lines)
-        max_w = max((_measure(font, ln) for ln in lines), default=0)
+        max_w = max((_string_width_pt(ln, size_pt) for ln in lines), default=0.0)
         return lines, total_h, max_w
 
     for size in range(MAX_FONT_PT, MIN_FONT_PT - 1, -1):
         lines, total_h, max_w = _layout_at(size)
-        if total_h <= height_px and max_w <= width_px:
+        if total_h <= height_pt and max_w <= max_w_pt:
             return size, lines
 
     lines, _, _ = _layout_at(MIN_FONT_PT)
@@ -396,18 +428,8 @@ def build_slide_layout(side: CardSide) -> SlideLayout:
 def _render_pdf_to(sides: List[CardSide], sink) -> None:
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import inch
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
 
-    font_name = "Helvetica"
-    ttf_path = _find_font_path()
-    if ttf_path and ttf_path.lower().endswith(".ttf"):
-        try:
-            pdfmetrics.registerFont(TTFont("DeckFont", ttf_path))
-            font_name = "DeckFont"
-        except Exception as exc:
-            print(f"warning: falling back to Helvetica ({exc})", file=sys.stderr)
-
+    font_name = _ensure_pdf_font()
     page_size = (SLIDE_WIDTH_IN * inch, SLIDE_HEIGHT_IN * inch)
     c = canvas.Canvas(sink, pagesize=page_size)
 
