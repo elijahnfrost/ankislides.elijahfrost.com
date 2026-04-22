@@ -368,9 +368,11 @@
     .file-list.visible { display: flex; }
     .file-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto auto;
-      align-items: center;
-      gap: 18px;
+      /* Second column must be able to shrink and wrap; `auto` + nowrap made
+         long error strings steal width and crush the file name + meta. */
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+      align-items: start;
+      gap: 18px 16px;
       padding: 16px 20px;
       border-top: 1px solid var(--color-border-divider);
       font-size: 14px;
@@ -396,12 +398,19 @@
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--color-fg-muted);
-      white-space: nowrap;
+      min-width: 0;
+      line-height: 1.45;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
     .file-row[data-state="done"] .state { color: var(--color-success-text); }
     .file-row[data-state="error"] .state { color: var(--color-error-text); }
     .file-row[data-state="converting"] .state,
     .file-row[data-state="uploading"] .state { color: var(--color-fg); }
+    .file-row > button.remove,
+    .file-row > button.cancel {
+      align-self: center;
+    }
     .file-row button.remove,
     .file-row button.cancel {
       background: transparent;
@@ -558,6 +567,9 @@
       text-transform: uppercase;
       color: var(--color-fg-muted);
       min-height: 1.2em;
+      line-height: 1.45;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
     .status.error { color: var(--color-error-text); }
     .status.success { color: var(--color-success-text); }
