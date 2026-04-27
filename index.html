@@ -755,6 +755,14 @@
       font-weight: 400;
       letter-spacing: 0;
       line-height: 1.45;
+      /* Keep export-format labels on one line at typical widths — narrow
+       * views fall back to wrapping. */
+      white-space: nowrap;
+    }
+    @media (max-width: 560px) {
+      .reference table.ref td.ref-format {
+        white-space: normal;
+      }
     }
     /* Code-shaped extensions stay monospace; prose stays Inter — warmer
      * than all-mono without losing scanability for `.apkg`-style tokens. */
@@ -949,8 +957,8 @@
     </section>
   </div>
 
-  <section class="reference fade-in-up delay-4" aria-label="Format reference">
-    <h2>What's <em>included</em></h2>
+  <section class="reference fade-in-up delay-4" aria-label="Accepted formats">
+    <h2>Accepted <em>formats</em></h2>
 
     <table class="ref">
         <colgroup>
@@ -971,28 +979,34 @@
         </thead>
         <tbody class="ref-group ref-group-anki">
           <tr>
-            <th scope="rowgroup" rowspan="4" class="ref-app-cell">
+            <th scope="rowgroup" rowspan="5" class="ref-app-cell">
               <span class="ref-app-name">Anki</span>
             </th>
-            <td class="ref-format"><code>.apkg</code></td>
+            <td class="ref-format">Anki Deck Package (<code>.apkg</code>)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td class="ref-format"><code>.zip</code> (+ media)</td>
-            <td><span class="y">&check;</span></td>
-            <td><span class="y">&check;</span></td>
-            <td><span class="y">&check;</span></td>
-          </tr>
-          <tr>
-            <td class="ref-format"><code>.txt</code> (Notes in Plain Text)</td>
+            <td class="ref-format">Notes in Plain Text (<code>.txt</code>)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="n">&mdash;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
+          <tr>
+            <td class="ref-format">Cards in Plain Text (<code>.txt</code>)</td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
+          </tr>
+          <tr>
+            <td class="ref-format">PDF Exporter (<code>.html</code>)</td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
+          </tr>
           <tr class="unsupported">
-            <td class="ref-format"><code>.colpkg</code> (collection backup)</td>
+            <td class="ref-format">Anki Collection&nbsp;Package&nbsp;(<code>.colpkg</code>)</td>
             <td><span class="x">&times;</span></td>
             <td><span class="x">&times;</span></td>
             <td><span class="x">&times;</span></td>
