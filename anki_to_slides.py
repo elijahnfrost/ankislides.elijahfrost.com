@@ -213,7 +213,10 @@ class _ToggleCollector(HTMLParser):
         if not self._details_stack:
             return
         frame = self._details_stack[-1]
-        if frame["in_summary"] and frame["summary_depth"] == 0:
+        # While we're anywhere inside the outer ``<summary>`` (even nested
+        # via a child ``<summary>``, which is invalid HTML but Notion has
+        # been known to produce odd shapes) the data belongs on the front.
+        if frame["in_summary"]:
             frame["summary"].append(raw)
         else:
             frame["body"].append(raw)
@@ -258,11 +261,10 @@ class _ToggleCollector(HTMLParser):
             summary_html = "".join(frame["summary"]).strip()
             body_html = "".join(frame["body"]).strip()
             self.toggles.append((summary_html, body_html))
-            # Re-emit the closed nested details into the parent's body as a
-            # placeholder marker we can later strip — keeps the parent's
-            # back from accidentally containing the child's contents.
-            if self._details_stack:
-                self._details_stack[-1]["body"].append("")
+            # The parent's body is unchanged: while the nested details was
+            # open, the child's frame was the active one, so nothing during
+            # that span ever landed on the parent. That's how we keep the
+            # parent's back free of the child's contents.
             return
         if not self._details_stack:
             return

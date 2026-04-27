@@ -767,16 +767,22 @@ class handler(BaseHTTPRequestHandler):
                 media_dir = Path("/nonexistent-media")
 
                 ext = os.path.splitext(name_lower)[1] if name_lower else ""
-                # Prefer the filename extension for routing (a .md with
-                # <details> needs the markdown image-syntax pre-pass that
-                # the HTML branch skips). Fall back to content sniffing
-                # for unhinted uploads.
+                # Prefer the filename extension for routing — Anki .txt
+                # exports with HTML enabled can legitimately contain a
+                # ``<details>`` tag inside a card field, and we don't want
+                # the content sniffer to capture them. ``.md`` needs the
+                # markdown image-syntax pre-pass that the HTML branch
+                # skips. We only fall back to content sniffing for
+                # unhinted uploads (filename empty or unrecognised
+                # extension).
                 if ext in (".md", ".markdown"):
                     source_kind = "notion-md"
                     sides = ats.read_cards_from_notion_markdown(text, media_dir)
                 elif ext in (".html", ".htm"):
                     source_kind = "notion-html"
                     sides = ats.read_cards_from_notion_html(text, media_dir)
+                elif ext == ".txt":
+                    sides = ats.read_cards_from_text(text, media_dir)
                 elif _looks_like_notion_html(raw):
                     source_kind = "notion-html"
                     sides = ats.read_cards_from_notion_html(text, media_dir)
