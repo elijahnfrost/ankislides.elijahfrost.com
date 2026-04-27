@@ -373,7 +373,9 @@
       display: none;
       flex-direction: column;
       border: 1px solid var(--color-border-section);
-      border-top: 0;
+      /* Stand-alone block instead of welded to the drop zone above —
+       * the upload control and the queue are two distinct things. */
+      margin-top: 16px;
     }
     .file-list.visible { display: flex; }
     .file-row {
@@ -401,7 +403,14 @@
       font-size: 14px;
     }
     .file-row .info { grid-area: info; }
-    .file-row .state { grid-area: state; justify-self: end; }
+    .file-row .state {
+      grid-area: state;
+      justify-self: end;
+      /* Match the remove/cancel button's vertical centering so the
+       * status line sits on the same horizontal axis as the action,
+       * regardless of how many lines the .info column wraps to. */
+      align-self: center;
+    }
     .file-row > button.remove,
     .file-row > button.cancel { grid-area: action; }
     .file-row .fmt-pick {
@@ -485,9 +494,11 @@
       background: var(--color-error-text);
       color: var(--color-bg);
     }
+    /* Footer of the file list — currently just the running file/size
+     * summary. The "clear all" action that used to share this row has
+     * moved out below the convert button. */
     .file-list .toolbar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
       gap: 12px;
       padding: 14px 20px;
@@ -497,23 +508,6 @@
       text-transform: uppercase;
       color: var(--color-fg-dim);
     }
-    .file-list .toolbar button {
-      background: transparent;
-      border: 1px solid var(--color-border);
-      color: var(--color-fg-soft);
-      padding: 6px 13px;
-      font-size: 10.5px;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      cursor: pointer;
-      font-family: inherit;
-      transition: border-color 120ms linear, color 120ms linear;
-    }
-    .file-list .toolbar button:hover:not(:disabled) {
-      border-color: var(--color-border-hover);
-      color: var(--color-fg);
-    }
-    .file-list .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* ----- Per-row output format selector (segmented buttons) -----
      * Each uploaded file gets its own visible chip group so a mixed batch
@@ -633,6 +627,36 @@
     .status.error { color: var(--color-error-text); }
     .status.success { color: var(--color-success-text); }
 
+    /* ----- Post-actions row -----
+     * Holds destructive/secondary actions that follow the primary
+     * submit — currently just "clear all". Lives below the convert
+     * button (and the status line) so the queue-clearing escape hatch
+     * is one click away without competing with the convert call to
+     * action visually. Stays hidden when the queue is empty. */
+    .post-actions {
+      display: flex;
+      justify-content: center;
+      margin-top: 18px;
+    }
+    .post-actions button {
+      background: transparent;
+      border: 0;
+      color: var(--color-fg-muted);
+      padding: 8px 14px;
+      font-family: inherit;
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color 120ms linear;
+    }
+    .post-actions button:hover:not(:disabled) { color: var(--color-fg); }
+    .post-actions button:focus-visible {
+      outline: 2px solid var(--color-fg-muted);
+      outline-offset: 2px;
+    }
+    .post-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
     /* ----- Reference block (bottom of page) -----
      * Replaces the old sidebar + two help accordions. Everything lives
      * here now: the input-format matrix, the "always dropped" list, and
@@ -656,81 +680,129 @@
 
     .reference table.ref {
       width: 100%;
+      max-width: 640px;
+      margin-left: 0;
       border-collapse: collapse;
-      /* Fixed so the 3 checkmark columns share equally — stops the
-       * right-hand headers clustering against the right edge. */
       table-layout: fixed;
       font-size: 14px;
+      /* No outer frame — interior lines come from cell borders below. */
+      border: 0;
     }
-    /* First column carries the format name and a short caption. The
-     * remaining 60% splits into three equal check columns. */
-    .reference table.ref col.col-label { width: 40%; }
-    .reference table.ref col.col-check { width: 20%; }
+    /* App · Format · Text · Images · Single — column widths follow the
+     * rowspan App rail + prose-heavy Format column. */
+    .reference table.ref col.col-app { width: 13%; }
+    .reference table.ref col.col-label { width: 37%; }
+    .reference table.ref col.col-check { width: 16.33%; }
     .reference table.ref th,
     .reference table.ref td {
-      padding: 16px 8px;
+      padding: 14px 12px;
       border-bottom: 1px solid var(--color-border-divider);
       text-align: center;
       vertical-align: middle;
       color: var(--color-fg-body);
     }
-    .reference table.ref th:first-child,
-    .reference table.ref td:first-child {
+    .reference table.ref thead th {
+      padding-top: 14px;
+      padding-bottom: 14px;
+      padding-left: 12px;
+      padding-right: 12px;
+      border-bottom: 1px solid var(--color-border-section);
+      color: var(--color-fg-soft);
+      font-weight: 500;
+      vertical-align: bottom;
+      font-family: var(--font-inter);
+      font-size: 10.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .reference table.ref thead th:first-child {
+      padding-left: 14px;
+      border-right: 1px solid var(--color-border-divider);
+    }
+    .reference table.ref tbody.ref-group-anki tr:first-child th.ref-app-cell,
+    .reference table.ref tbody.ref-group-anki tr:first-child td:nth-child(2) {
+      padding-top: 14px;
+    }
+    .reference table.ref tbody.ref-group-anki tr:not(:first-child) td:first-child.ref-format {
+      padding-top: 14px;
+    }
+    .reference table.ref th.ref-app-cell {
+      padding: 14px 12px;
+      vertical-align: middle;
+      text-align: center;
+      border-right: 1px solid var(--color-border-divider);
+      border-bottom: 0;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: normal;
+      background: transparent;
+    }
+    /* Divider between Anki and Notion blocks (not the outer table edge). */
+    .reference table.ref tbody.ref-group-notion tr:first-child th,
+    .reference table.ref tbody.ref-group-notion tr:first-child td {
+      border-top: 1px solid var(--color-border-section);
+      padding-top: 14px;
+    }
+    .reference table.ref th:nth-child(2),
+    .reference table.ref td.ref-format {
       text-align: left;
       color: var(--color-fg);
-      padding-left: 0;
+      padding-right: 12px;
     }
-    .reference table.ref td:first-child {
+    .reference table.ref td.ref-format {
+      font-family: var(--font-inter);
+      font-size: 13.5px;
+      font-weight: 400;
+      letter-spacing: 0;
+      line-height: 1.45;
+    }
+    /* Code-shaped extensions stay monospace; prose stays Inter — warmer
+     * than all-mono without losing scanability for `.apkg`-style tokens. */
+    .reference table.ref td.ref-format code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 13px;
+      font-weight: 400;
+      color: var(--color-fg);
+      background: transparent;
+      padding: 0;
+      border: 0;
     }
     .reference table.ref th:last-child,
     .reference table.ref td:last-child {
-      padding-right: 0;
+      padding-right: 14px;
     }
-    .reference table.ref th {
-      font-family: var(--font-inter);
-      font-size: 10.5px;
-      font-weight: 500;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--color-fg-dim);
-      padding-bottom: 14px;
+    /* No baseline line flush with the bottom margin of the block — avoids
+     * looking like a second “outer” frame; the rest of the grid lines stay. */
+    .reference table.ref tr:last-child td,
+    .reference table.ref tbody:last-child tr:last-child th {
+      border-bottom: 0;
     }
-    /* Column-header row sits flush against the first section title;
-     * the section title's own bottom border then provides the single
-     * divider before the data rows. Without this override, the column
-     * header row and the section title row would each draw their own
-     * bottom border 1.5em apart, which reads as a doubled rule. */
-    .reference table.ref thead th { border-bottom: 0; }
-    .reference table.ref tr:last-child td { border-bottom: 0; }
     .reference table.ref td .y { color: var(--color-fg); }
     .reference table.ref td .n { color: var(--color-fg-dim); }
     .reference table.ref td .x { color: var(--color-fg-dim); }
-    /* Section header rows split the table into "Anki" and "Notion"
-     * groups. They're a single full-width <th colspan> with the same
-     * uppercase-micro-type as the column headers, slightly more space
-     * above so the eye reads them as group titles, not column titles. */
-    .reference table.ref tr.section th {
-      text-align: left;
-      padding: 28px 0 12px;
+
+    /* App column — rowspan cell; centered horizontal label only. */
+    .reference table.ref .ref-app-name {
+      display: inline-block;
       font-family: var(--font-inter);
       font-size: 11px;
-      font-weight: 500;
+      font-weight: 600;
       letter-spacing: 0.18em;
       text-transform: uppercase;
       color: var(--color-fg);
-      border-bottom: 1px solid var(--color-border);
+      line-height: 1.2;
     }
-    .reference table.ref tr.section.first th { padding-top: 0; }
-    /* Rows for unsupported inputs read as muted, with the format name
-     * struck through so it's unmistakable that picking this option in
-     * Notion (or exporting this Anki shape) won't work here. */
+
+    /* Rows for unsupported inputs read as muted; strike only the format cell.
+     * ``code`` inside .ref-format keeps its own `--color-fg` elsewhere — force
+     * it dim here so `.colpkg` matches plain ``PDF``. */
     .reference table.ref tr.unsupported td {
       color: var(--color-fg-dim);
     }
-    .reference table.ref tr.unsupported td:first-child {
+    .reference table.ref tr.unsupported td.ref-format code {
       color: var(--color-fg-dim);
+    }
+    .reference table.ref tr.unsupported td.ref-format {
       text-decoration: line-through;
       text-decoration-color: var(--color-fg-dim);
     }
@@ -868,6 +940,10 @@
       </button>
       <div id="status" class="status" role="status" aria-live="polite"></div>
 
+      <div id="post-actions" class="post-actions" hidden>
+        <button type="button" id="clear-all">Clear all</button>
+      </div>
+
       </form>
 
     </section>
@@ -878,6 +954,7 @@
 
     <table class="ref">
         <colgroup>
+          <col class="col-app" />
           <col class="col-label" />
           <col class="col-check" />
           <col class="col-check" />
@@ -885,54 +962,60 @@
         </colgroup>
         <thead>
           <tr>
-            <th></th>
-            <th title="Card front and back text">Text</th>
-            <th title="&lt;img src&gt; references, embedded into slides">Images</th>
-            <th title="Single-file upload">Single</th>
+            <th scope="col">App</th>
+            <th scope="col">Format</th>
+            <th scope="col" title="Card front and back text">Text</th>
+            <th scope="col" title="&lt;img src&gt; references, embedded into slides">Images</th>
+            <th scope="col" title="Single-file upload">Single</th>
           </tr>
         </thead>
-        <tbody>
-          <tr class="section first"><th colspan="4">Anki <span aria-hidden="true">&middot;</span> File &rsaquo; Export &rsaquo; Current deck</th></tr>
+        <tbody class="ref-group ref-group-anki">
           <tr>
-            <td>.apkg</td>
+            <th scope="rowgroup" rowspan="4" class="ref-app-cell">
+              <span class="ref-app-name">Anki</span>
+            </th>
+            <td class="ref-format"><code>.apkg</code></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>.zip (+ media)</td>
+            <td class="ref-format"><code>.zip</code> (+ media)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>.txt (Notes in Plain Text)</td>
+            <td class="ref-format"><code>.txt</code> (Notes in Plain Text)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="n">&mdash;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr class="unsupported">
-            <td>.colpkg (collection backup)</td>
+            <td class="ref-format"><code>.colpkg</code> (collection backup)</td>
             <td><span class="x">&times;</span></td>
             <td><span class="x">&times;</span></td>
             <td><span class="x">&times;</span></td>
           </tr>
-
-          <tr class="section"><th colspan="4">Notion <span aria-hidden="true">&middot;</span> &hellip; &rsaquo; Export &rsaquo; Export format</th></tr>
+        </tbody>
+        <tbody class="ref-group ref-group-notion">
           <tr>
-            <td>HTML</td>
+            <th scope="rowgroup" rowspan="3" class="ref-app-cell">
+              <span class="ref-app-name">Notion</span>
+            </th>
+            <td class="ref-format">HTML</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>Markdown &amp; CSV</td>
+            <td class="ref-format">Markdown &amp; CSV</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr class="unsupported">
-            <td>PDF</td>
+            <td class="ref-format">PDF</td>
             <td><span class="x">&times;</span></td>
             <td><span class="x">&times;</span></td>
             <td><span class="x">&times;</span></td>
@@ -1004,6 +1087,8 @@
   const submitLabel = document.getElementById("submit-label");
   const status = document.getElementById("status");
   const form = document.getElementById("form");
+  const postActions = document.getElementById("post-actions");
+  const clearAllBtn = document.getElementById("clear-all");
 
   const entries = [];
   let nextId = 1;
@@ -1260,11 +1345,71 @@
         return typeof e.progress === "number"
           ? "uploading " + e.progress + "%"
           : "uploading…";
-      case "converting": return "converting…";
+      case "converting":
+        // Mirrors the upload format so the row reads as one continuous
+        // progress story — count up to 100% during upload, reset to 0%
+        // and count up again during conversion. The convert percentage
+        // is simulated (the server doesn't stream progress) but ramps
+        // on a curve sized to the file so it feels truthful.
+        return typeof e.progress === "number"
+          ? "converting " + e.progress + "%"
+          : "converting…";
       case "done": return e.message || "done";
       case "error": return "failed — " + (e.message || "unknown");
       default: return "";
     }
+  }
+
+  // Update just the state cell + data-state attribute on a single row,
+  // without re-rendering the whole list. The simulated progress timer
+  // ticks 4 times a second; tearing down and rebuilding every row's
+  // format chips and event handlers at that rate is wasteful and risks
+  // dropping focus or click events mid-tick.
+  function renderEntryState(entry) {
+    const row = fileList.querySelector('[data-entry-id="' + entry.id + '"]');
+    if (!row) return;
+    row.dataset.state = entry.state;
+    const stateEl = row.querySelector(".state");
+    if (stateEl) stateEl.textContent = stateLabel(entry);
+  }
+
+  // Drives the simulated converting-phase progress bar. The server
+  // doesn't expose a real progress signal during conversion, so we
+  // approximate one with an asymptotic curve that starts at 0 and
+  // climbs toward 95% over an estimate sized to the file's byte count.
+  // We deliberately stop short of 100% so the final jump to 100% only
+  // happens when the response actually arrives.
+  function startSimulatedProgress(entry, estimateMs) {
+    if (entry._progressTimer) clearInterval(entry._progressTimer);
+    entry.progress = 0;
+    renderEntryState(entry);
+    const start = Date.now();
+    entry._progressTimer = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(
+        95,
+        Math.floor(95 * (1 - Math.exp(-elapsed / estimateMs)))
+      );
+      if (entry.progress !== pct) {
+        entry.progress = pct;
+        renderEntryState(entry);
+      }
+    }, 250);
+  }
+
+  function stopSimulatedProgress(entry) {
+    if (entry._progressTimer) {
+      clearInterval(entry._progressTimer);
+      entry._progressTimer = null;
+    }
+  }
+
+  // Rough "this should take about N ms" estimate for a given file. Used
+  // as the time constant for the simulated convert curve — bigger files
+  // ramp slower so the bar doesn't sit near 95% the whole conversion.
+  function estimateConvertMs(file) {
+    const mb = file.size / (1024 * 1024);
+    return Math.max(4000, Math.min(45000, 1500 + mb * 700));
   }
 
   function setSubmitLabel(text) {
@@ -1277,6 +1422,7 @@
       fileList.classList.remove("visible");
       submit.disabled = true;
       setSubmitLabel("Convert & download");
+      postActions.hidden = true;
       return;
     }
     fileList.classList.add("visible");
@@ -1284,11 +1430,14 @@
     setSubmitLabel(entries.length === 1
       ? "Convert & download"
       : "Convert & download " + entries.length + " files");
+    postActions.hidden = false;
+    clearAllBtn.disabled = converting;
 
     for (const e of entries) {
       const row = document.createElement("div");
       row.className = "file-row";
       row.dataset.state = e.state;
+      row.dataset.entryId = e.id;
 
       const info = document.createElement("div");
       info.className = "info";
@@ -1365,19 +1514,16 @@
       fileList.appendChild(row);
     }
 
+    // "Clear all" lives below the convert button now (see #post-actions).
+    // The toolbar inside the file list keeps just the running file/size
+    // summary so the queue's footer stays informational, not interactive.
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar";
     const summary = document.createElement("span");
     const total = entries.reduce((s, e) => s + e.file.size, 0);
     summary.textContent = entries.length + " file"
       + (entries.length === 1 ? "" : "s") + " · " + formatBytes(total);
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.textContent = "clear all";
-    clear.disabled = converting;
-    clear.addEventListener("click", clearAll);
     toolbar.appendChild(summary);
-    toolbar.appendChild(clear);
     fileList.appendChild(toolbar);
   }
 
@@ -1385,6 +1531,8 @@
     addFiles(e.target.files);
     fileInput.value = "";
   });
+
+  clearAllBtn.addEventListener("click", clearAll);
 
   ["dragenter", "dragover"].forEach((ev) => {
     drop.addEventListener(ev, (e) => {
@@ -1554,7 +1702,39 @@
     }
   }
 
-  async function postConvertRaw(entry, fmt) {
+  // Lightweight Response shim built from a finished XHR. The raw-body
+  // path uses XHR (rather than fetch) so we can wire upload progress
+  // events into the per-row "uploading X%" indicator — fetch() doesn't
+  // expose request-side progress. The rest of convertOne consumes a
+  // standard Response, so we mimic the .ok/.status/.headers/.blob/.json
+  // surface it actually uses.
+  function xhrToResponse(xhr) {
+    const headers = new Map();
+    const raw = xhr.getAllResponseHeaders() || "";
+    for (const line of raw.trim().split(/\r?\n/)) {
+      if (!line) continue;
+      const idx = line.indexOf(":");
+      if (idx > 0) {
+        headers.set(
+          line.slice(0, idx).trim().toLowerCase(),
+          line.slice(idx + 1).trim()
+        );
+      }
+    }
+    const body = xhr.response;
+    return {
+      ok: xhr.status >= 200 && xhr.status < 300,
+      status: xhr.status,
+      headers: { get: (k) => headers.get(String(k).toLowerCase()) || null },
+      blob: async () => (body instanceof Blob ? body : new Blob([body])),
+      json: async () => {
+        if (body instanceof Blob) return JSON.parse(await body.text());
+        return JSON.parse(typeof body === "string" ? body : "");
+      },
+    };
+  }
+
+  function postConvertRaw(entry, fmt) {
     const file = entry.file;
     const ext = fileExt(file);
     const isBinary = ext === ".zip" || ext === ".apkg"
@@ -1563,33 +1743,68 @@
     const url = "/api/convert?format=" + encodeURIComponent(fmt)
       + "&filename=" + encodeURIComponent(file.name);
 
-    entry.state = "uploading";
-    entry.progress = undefined;
-    renderList();
+    return new Promise((resolve, reject) => {
+      entry.state = "uploading";
+      entry.progress = 0;
+      renderList();
 
-    const controller = new AbortController();
-    entry._fetchController = controller;
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: file,
-        signal: controller.signal,
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url, true);
+      xhr.setRequestHeader("Content-Type", contentType);
+      // Need a Blob (not a string) on the way back so xhrToResponse can
+      // hand convertOne something it can call .blob() on without an
+      // extra parse step.
+      xhr.responseType = "blob";
+
+      entry._xhr = xhr;
+      let uploadDone = false;
+
+      if (xhr.upload) {
+        xhr.upload.addEventListener("progress", (ev) => {
+          if (!ev.lengthComputable || uploadDone) return;
+          const pct = ev.total > 0
+            ? Math.floor((ev.loaded / ev.total) * 100)
+            : 0;
+          if (entry.progress !== pct) {
+            entry.progress = pct;
+            renderEntryState(entry);
+          }
+        });
+        // Once the bytes have left the browser, flip to the converting
+        // phase and start the simulated progress curve from 0%. The
+        // server doesn't send anything back until conversion finishes,
+        // so this is the only honest moment to mark the transition.
+        xhr.upload.addEventListener("load", () => {
+          uploadDone = true;
+          entry.state = "converting";
+          renderEntryState(entry);
+          startSimulatedProgress(entry, estimateConvertMs(file));
+        });
+      }
+
+      xhr.addEventListener("load", () => {
+        stopSimulatedProgress(entry);
+        entry.progress = 100;
+        renderEntryState(entry);
+        entry._xhr = null;
+        resolve(xhrToResponse(xhr));
       });
-      entry._fetchController = null;
-      return res;
-    } catch (err) {
-      entry._fetchController = null;
-      if (err && err.name === "AbortError") throw new CancelledError();
-      // fetch() rejects (rather than returning a non-2xx response) when the
-      // browser never got an HTTP status back — server dropped the
-      // connection mid-upload, process isn't running, or the network
-      // blipped. The native message is useless, so we translate.
-      throw new Error(
-        "could not reach the converter. Check that the converter is "
-        + "reachable, then try again."
-      );
-    }
+      xhr.addEventListener("error", () => {
+        stopSimulatedProgress(entry);
+        entry._xhr = null;
+        reject(new Error(
+          "could not reach the converter. Check that the converter is "
+          + "reachable, then try again."
+        ));
+      });
+      xhr.addEventListener("abort", () => {
+        stopSimulatedProgress(entry);
+        entry._xhr = null;
+        reject(new CancelledError());
+      });
+
+      xhr.send(file);
+    });
   }
 
   async function postConvertBlob(entry, fmt) {
@@ -1633,8 +1848,9 @@
     }
 
     entry.state = "converting";
-    entry.progress = undefined;
+    entry.progress = 0;
     renderList();
+    startSimulatedProgress(entry, estimateConvertMs(file));
 
     const url = "/api/convert?format=" + encodeURIComponent(fmt);
     const controller = new AbortController();
@@ -1646,9 +1862,13 @@
         body: JSON.stringify({ blobUrl: entry.blobUrl, filename: file.name }),
         signal: controller.signal,
       });
+      stopSimulatedProgress(entry);
+      entry.progress = 100;
+      renderEntryState(entry);
       entry._fetchController = null;
       return res;
     } catch (err) {
+      stopSimulatedProgress(entry);
       entry._fetchController = null;
       if (err && err.name === "AbortError") throw new CancelledError();
       throw new Error(
@@ -1753,9 +1973,13 @@
       entry.state = "converting";
       renderList();
       const position = entries.findIndex((e) => e.id === id) + 1;
+      // Don't echo the filename here — each row already shows its own
+      // name + per-file progress in the queue, and repeating it in the
+      // status line below the convert button doubles up on something
+      // the user can already see.
       setStatus(
         '<span class="spinner"></span>Converting ' + position + " of "
-        + entries.length + " — " + entry.file.name + "…"
+        + entries.length + "…"
       );
       try {
         const summary = await convertOne(entry, entry.format);
