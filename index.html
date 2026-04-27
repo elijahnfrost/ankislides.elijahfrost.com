@@ -667,16 +667,21 @@
     .reference {
       margin-top: 112px;
     }
-    .reference h2 {
-      font-family: var(--font-cormorant);
-      font-weight: 300;
-      font-size: 28px;
-      color: var(--color-fg);
-      letter-spacing: -0.005em;
-      margin: 0 0 28px;
+    .reference-heading.step {
+      margin-bottom: 28px;
+    }
+    .reference-heading.step h2.label {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      font-family: var(--font-inter);
+      font-size: 11.5px;
+      font-weight: 400;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-fg-soft);
       line-height: 1.2;
     }
-    .reference h2 em { font-style: italic; color: var(--color-fg-muted); }
 
     .reference table.ref {
       width: 100%;
@@ -815,20 +820,21 @@
       text-decoration-color: var(--color-fg-dim);
     }
 
-    /* Notes live side-by-side under the table on desktop, stacked on
-     * narrow widths. Same divider style as the table above so the
-     * bottom section reads as one typographic block. ``auto-fit`` lets
-     * the panel flow to N columns based on width (3 wide / 2 medium /
-     * 1 narrow) so adding or removing a note doesn't orphan one card on
-     * its own row. */
+    /* Explainer bullets sit under the matrix under one rule — still part of
+     * step ``02`` (same section as the table); divider is lighter than the
+     * main reference break above so it reads as subsection, not a new step. */
     .reference .notes {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 56px;
-      margin-top: 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 36px;
+      max-width: 640px;
+      margin-top: 72px;
+      margin-left: 0;
+      padding-top: 44px;
+      border-top: 1px solid var(--color-border-divider);
     }
     @media (max-width: 560px) {
-      .reference .notes { grid-template-columns: 1fr; gap: 32px; }
+      .reference .notes { gap: 28px; }
     }
     .reference .note {
       font-size: 13.5px;
@@ -839,7 +845,7 @@
       font-size: 10.5px;
       letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: var(--color-fg-dim);
+      color: var(--color-fg-soft);
       margin-bottom: 14px;
     }
     .reference .drop-list {
@@ -866,7 +872,6 @@
       border-radius: 50%;
       background: var(--color-bullet);
     }
-    .reference .note p { margin: 0; }
     .reference code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12.5px;
@@ -957,8 +962,11 @@
     </section>
   </div>
 
-  <section class="reference fade-in-up delay-4" aria-label="Accepted formats">
-    <h2>Accepted <em>formats</em></h2>
+  <section class="reference fade-in-up delay-4" aria-label="Accepted formats and import behaviour">
+    <div class="reference-heading step">
+      <div class="num">02</div>
+      <h2 class="label">Accepted formats</h2>
+    </div>
 
     <table class="ref">
         <colgroup>
@@ -1046,23 +1054,28 @@
             <li>MathJax / LaTeX stays as raw source</li>
             <li>Tags, deck name, scheduling</li>
             <li>Notion HTML / Markdown: only <code>&lt;details&gt;</code> toggles become cards &mdash; non-toggle blocks are ignored</li>
-            <li>Notion CSV (database alone): only the first two columns are used &mdash; the header row and extra property columns are ignored</li>
+            <li>Notion CSV (database alone): first two columns only; header row and extra columns ignored</li>
           </ul>
         </div>
 
-      <div class="note">
-        <div class="note-label">Why some inputs aren't supported</div>
-        <ul class="drop-list">
-          <li>Anki <code>.colpkg</code> is a full-profile backup carrying every deck and every media file in your collection &mdash; routinely multi-GB. Use <em>File &rsaquo; Export &rsaquo; Current deck &rsaquo; Anki Deck Package (.apkg)</em> instead.</li>
-          <li>Notion PDF flattens toggles into static blocks during export, so the front/back boundary is gone. Pick HTML or Markdown &amp; CSV instead.</li>
-        </ul>
-      </div>
+        <div class="note">
+          <div class="note-label">Preserved</div>
+          <ul class="drop-list">
+            <li>Cloze <code>{{c1::&hellip;}}</code> unwrapped to the answer text</li>
+            <li>Line breaks &amp; <code>&lt;br&gt;</code> kept</li>
+            <li>Notion toggles: summary &rarr; front, contents &rarr; back; nested toggles &rarr; separate cards</li>
+            <li>Multi&#8209;page Notion <code>.zip</code> exports unpacked recursively</li>
+          </ul>
+        </div>
 
-      <div class="note">
-        <div class="note-label">Preserved</div>
-        <p>Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved. For Notion toggle pages the summary becomes the front and the toggle's contents become the back; nested toggles each become their own card. Multi&#8209;page Notion <code>.zip</code> exports (one zip per page inside an outer zip) are unpacked recursively.</p>
+        <div class="note">
+          <div class="note-label">Why some inputs aren't supported</div>
+          <ul class="drop-list">
+            <li><code>.colpkg</code> is a full Anki profile backup (often multi&#8209;GB). Export <em>current deck</em> as <code>.apkg</code> instead.</li>
+            <li>Notion PDF flattens toggles &mdash; use HTML, Markdown, or CSV.</li>
+          </ul>
+        </div>
       </div>
-    </div>
   </section>
 
 </main>
