@@ -191,7 +191,10 @@ class ZipFallbackTests(unittest.TestCase):
         )
         return ats.render_apkg_bytes(sides, deck_name="Inner")
 
-    def test_zip_with_nested_apkg_extracts_cards(self):
+    def test_zip_with_nested_apkg_returns_one_deck_per_apkg(self):
+        """A zip with two .apkg files should surface as two separate decks
+        (so the handler renders one output file per deck inside an outer
+        zip), not be merged into one mega-deck."""
         inner_a = self._make_apkg("Q1", "A1")
         inner_b = self._make_apkg("Q2", "A2")
         buf = io.BytesIO()
@@ -202,14 +205,18 @@ class ZipFallbackTests(unittest.TestCase):
         # Plain anki-bundle detection looks at the *outer* zip and won't match.
         self.assertFalse(self.api._is_anki_bundle(body))
         with tempfile.TemporaryDirectory() as d:
-            text, _media, contents = self.api._extract_zip_flat(body, Path(d))
-        self.assertIsNotNone(text)
-        sides = ats.read_cards_from_text(text, Path("/nonexistent"))
-        texts = {s.text for s in sides}
-        self.assertIn("Q1", texts)
-        self.assertIn("A1", texts)
-        self.assertIn("Q2", texts)
-        self.assertIn("A2", texts)
+            decks, _media, contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertEqual(len(decks), 2)
+        deck_names = [d[0] for d in decks]
+        self.assertIn("deck-a", deck_names)
+        self.assertIn("deck-b", deck_names)
+        # Each deck's text parses as its own deck.
+        per_deck_texts = {
+            name: {s.text for s in ats.read_cards_from_text(text, Path("/nonexistent"))}
+            for name, text in decks
+        }
+        self.assertEqual(per_deck_texts["deck-a"], {"Q1", "A1"})
+        self.assertEqual(per_deck_texts["deck-b"], {"Q2", "A2"})
         self.assertEqual(contents.get(".apkg"), 2)
 
     def test_zip_with_csv_export_is_accepted(self):
@@ -219,12 +226,13 @@ class ZipFallbackTests(unittest.TestCase):
             zf.writestr("logo.png", b"\x89PNG\r\n\x1a\n")
         body = buf.getvalue()
         with tempfile.TemporaryDirectory() as d:
-            text, media, contents = self.api._extract_zip_flat(body, Path(d))
-        self.assertIsNotNone(text)
+            decks, media, contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertEqual(len(decks), 1)
+        self.assertEqual(decks[0][0], "deck")
         self.assertEqual(media, 1)
         self.assertEqual(contents.get(".csv"), 1)
         # The csv shape parses identically to the Anki txt export.
-        sides = ats.read_cards_from_text(text, Path("/nonexistent"))
+        sides = ats.read_cards_from_text(decks[0][1], Path("/nonexistent"))
         self.assertEqual([s.text for s in sides[-2:]], ["Q1", "A1"])
 
     def test_zip_with_no_deck_returns_diagnostic_summary(self):
@@ -234,11 +242,60 @@ class ZipFallbackTests(unittest.TestCase):
             zf.writestr("notes.pdf", b"%PDF-1.4")
         body = buf.getvalue()
         with tempfile.TemporaryDirectory() as d:
-            text, _media, contents = self.api._extract_zip_flat(body, Path(d))
-        self.assertIsNone(text)
+            decks, _media, contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertEqual(decks, [])
         summary = self.api._summarize_zip_contents(contents)
         self.assertIn(".png", summary)
         self.assertIn(".pdf", summary)
+
+    def test_zip_with_two_txt_files_returns_two_decks(self):
+        """Two .txt exports inside a single zip should be split into two
+        separate decks rather than being merged."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("alpha.txt", "Q1\tA1\n")
+            zf.writestr("beta.txt", "Q2\tA2\n")
+        body = buf.getvalue()
+        with tempfile.TemporaryDirectory() as d:
+            decks, _media, _contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertEqual(len(decks), 2)
+        self.assertEqual({d[0] for d in decks}, {"alpha", "beta"})
+
+    def test_dedupe_deck_names_handles_collisions(self):
+        self.assertEqual(
+            self.api._dedupe_deck_names(["deck", "deck", "deck", "other"]),
+            ["deck", "deck-2", "deck-3", "other"],
+        )
+
+    def test_render_multi_deck_outputs_one_entry_per_deck(self):
+        """Driving the handler's multi-deck renderer with two decks should
+        produce an outer zip containing exactly one PDF per deck."""
+        sides_a = ats.read_cards_from_text("Q1\tA1\n", Path("/nonexistent"))
+        sides_b = ats.read_cards_from_text("Q2\tA2\n", Path("/nonexistent"))
+        # _render_multi_deck is an instance method on the BaseHTTPRequestHandler
+        # subclass, so we bind it manually with a SimpleNamespace as `self`.
+        # It only references `self` for the method name; no other state.
+        handler_cls = self.api.handler
+        bound = handler_cls._render_multi_deck
+        outer_bytes, total = bound(
+            None, [("alpha", sides_a), ("beta", sides_b)], "pdf"
+        )
+        self.assertGreater(total, 0)
+        self.assertEqual(outer_bytes[:2], b"PK")  # zip magic
+        with zipfile.ZipFile(io.BytesIO(outer_bytes)) as zf:
+            names = set(zf.namelist())
+        self.assertEqual(names, {"alpha.pdf", "beta.pdf"})
+
+    def test_render_multi_deck_apkg_uses_per_deck_names(self):
+        sides_a = ats.read_cards_from_text("Q1\tA1\n", Path("/nonexistent"))
+        sides_b = ats.read_cards_from_text("Q2\tA2\n", Path("/nonexistent"))
+        bound = self.api.handler._render_multi_deck
+        outer_bytes, _ = bound(
+            None, [("alpha", sides_a), ("beta", sides_b)], "apkg"
+        )
+        with zipfile.ZipFile(io.BytesIO(outer_bytes)) as zf:
+            names = set(zf.namelist())
+        self.assertEqual(names, {"alpha.apkg", "beta.apkg"})
 
 
 if __name__ == "__main__":

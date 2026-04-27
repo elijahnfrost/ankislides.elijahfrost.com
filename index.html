@@ -1577,6 +1577,12 @@
 
     const slideCount = res.headers.get("X-Slide-Count");
     const mediaCount = parseInt(res.headers.get("X-Media-Count") || "0", 10);
+    // ``X-Deck-Count`` is set only when the upload was a zip carrying
+    // multiple decks and we returned an outer zip with one rendered file
+    // per deck. Surface that in the per-row "done" message so the user
+    // knows the .zip they got back contains N decks (rather than
+    // wondering why their PDF download is a .zip).
+    const deckCount = parseInt(res.headers.get("X-Deck-Count") || "0", 10);
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
     const match = /filename="([^"]+)"/.exec(disposition);
@@ -1594,7 +1600,10 @@
     const mediaBlurb = mediaCount > 0
       ? " · " + mediaCount + " image" + (mediaCount === 1 ? "" : "s")
       : "";
-    return (slideCount || "?") + " slides" + mediaBlurb;
+    const deckBlurb = deckCount > 1
+      ? deckCount + " decks · "
+      : "";
+    return deckBlurb + (slideCount || "?") + " slides" + mediaBlurb;
   }
 
   form.addEventListener("submit", async (e) => {

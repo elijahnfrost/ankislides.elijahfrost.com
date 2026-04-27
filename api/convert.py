@@ -480,32 +480,72 @@ def _summarize_zip_contents(counts: dict) -> str:
     )
 
 
-def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int, dict]:
+def _safe_deck_name(raw: str, fallback: str = "deck") -> str:
+    """Sanitise a filename's stem into something safe for output filenames.
+
+    Used as the per-deck name when a zip contains multiple decks: each
+    inner deck contributes one file in the outer response zip and we
+    don't want path separators or weird control characters leaking into
+    the archive entry name.
+    """
+    stem = Path(raw or fallback).stem or fallback
+    cleaned = _SAFE_STEM.sub("_", stem).strip("._-") or fallback
+    return cleaned[:80]
+
+
+def _dedupe_deck_names(names: list[str]) -> list[str]:
+    """Return ``names`` with duplicates suffixed (e.g. ``deck``, ``deck-2``)."""
+    out: list[str] = []
+    seen: dict[str, int] = {}
+    for n in names:
+        base = n or "deck"
+        if base not in seen:
+            seen[base] = 1
+            out.append(base)
+        else:
+            seen[base] += 1
+            out.append(f"{base}-{seen[base]}")
+    return out
+
+
+def _extract_zip_flat(
+    body: bytes, dest: Path
+) -> Tuple[list[Tuple[str, str]], int, dict]:
     """Extract every file from ``body`` into ``dest`` using its basename.
 
-    Returns ``(text, media_file_count, contents_by_ext)``. ``text`` is the
-    deck text we'll feed to the parser, sourced (in priority order) from:
+    Returns ``(decks, media_file_count, contents_by_ext)``. ``decks`` is
+    a list of ``(deck_name, deck_text)`` tuples in archive order — one
+    entry per "deck-like" file we recognised inside the zip. The handler
+    decides what to do with the list: a single entry renders to a single
+    output file (the original behaviour); multiple entries render each
+    deck independently and bundle the outputs in an outer zip so the
+    user gets, for example, two separate PDFs back when their upload
+    contained two decks.
 
-      1. A ``.txt`` entry — Anki's "Notes in Plain Text (.txt)" export.
-         If multiple are present we pick the largest.
-      2. A ``.csv``/``.tsv`` entry — same shape as the Anki .txt export
-         (tab-separated front/back), just a different extension. Some
-         Anki addons and cross-platform tools default to these.
-      3. One or more nested ``.apkg``/``.colpkg`` archives — we extract
-         each and concatenate their reconstructed TSVs. This is the
-         shape of a "batch export" of several decks bundled together
-         (e.g. ``anki-decks-<hash>.zip``); without this branch every such
-         upload failed with "no .txt file found inside the zip".
+    Recognised deck-like entries are:
+
+      1. ``.txt`` — Anki's "Notes in Plain Text (.txt)" export.
+      2. ``.csv``/``.tsv`` — same tab-separated front/back shape as
+         Anki's ``.txt``, just a different extension; produced by some
+         Anki addons and cross-platform tools.
+      3. Nested ``.apkg``/``.colpkg`` archives — each is run through
+         ``_extract_anki_bundle`` to reconstruct its TSV, with media
+         dumped into ``dest`` under original filenames.
+
+    Image entries (``.png``/``.jpg``/…) at any depth are flattened into
+    ``dest`` by basename so ``<img src>`` references in the txt-style
+    decks resolve. Per-``.apkg`` media is dumped by the bundle extractor
+    itself.
 
     ``contents_by_ext`` is a ``{ext: count}`` map used to build a
-    diagnostic error message when we still can't find a payload.
+    diagnostic error message when we still can't find any payload.
 
     Directory-only entries, hidden files, ``__MACOSX`` resource-fork
     junk, and name collisions (later wins) are ignored.
     """
-    txt_candidates: list[tuple[int, str]] = []  # (size, text)
-    csv_candidates: list[tuple[int, str]] = []
-    apkg_candidates: list[tuple[str, bytes]] = []  # (basename, raw bytes)
+    txt_entries: list[tuple[str, str]] = []   # (basename, decoded text)
+    csv_entries: list[tuple[str, str]] = []
+    apkg_entries: list[tuple[str, bytes]] = []  # (basename, raw .apkg bytes)
     media_count = 0
     contents: dict[str, int] = {}
 
@@ -528,17 +568,17 @@ def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int, dict
             if ext == ".txt":
                 decoded = _decode_text_candidate(data)
                 if decoded is not None:
-                    txt_candidates.append((len(data), decoded))
+                    txt_entries.append((basename, decoded))
                 continue
 
             if ext in (".csv", ".tsv"):
                 decoded = _decode_text_candidate(data)
                 if decoded is not None:
-                    csv_candidates.append((len(data), decoded))
+                    csv_entries.append((basename, decoded))
                 continue
 
             if ext in (".apkg", ".colpkg"):
-                apkg_candidates.append((basename, data))
+                apkg_entries.append((basename, data))
                 continue
 
             if ext in _IMAGE_EXTS:
@@ -547,35 +587,32 @@ def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int, dict
                     out.write(data)
                 media_count += 1
 
-    if txt_candidates:
-        txt_candidates.sort(reverse=True)
-        return txt_candidates[0][1], media_count, contents
+    decks: list[tuple[str, str]] = []
+    # Priority order matches the previous "pick a single deck" priority:
+    # .txt > .csv/.tsv > nested .apkg. With multi-deck support each entry
+    # is its own deck; the order only matters for the rendered filenames.
+    for basename, decoded in txt_entries:
+        if decoded.strip():
+            decks.append((_safe_deck_name(basename), decoded))
+    for basename, decoded in csv_entries:
+        if decoded.strip():
+            decks.append((_safe_deck_name(basename), decoded))
+    for basename, blob in apkg_entries:
+        try:
+            inner_text, inner_media = _extract_anki_bundle(blob, dest)
+        except Exception:
+            # If a single nested bundle is malformed we skip it and keep
+            # whatever else we did manage to extract — better to convert
+            # 4 of 5 decks than fail the whole upload.
+            continue
+        if inner_text.strip():
+            decks.append((_safe_deck_name(basename), inner_text))
+            media_count += inner_media
 
-    if csv_candidates:
-        csv_candidates.sort(reverse=True)
-        return csv_candidates[0][1], media_count, contents
-
-    if apkg_candidates:
-        # Concatenate the TSVs from every nested Anki bundle. Media files
-        # are extracted into ``dest`` by ``_extract_anki_bundle`` itself
-        # (using each bundle's media manifest to get original filenames),
-        # so ``<img src>`` references resolve as if the user had uploaded
-        # a single .apkg. If any individual bundle fails to parse we skip
-        # it and surface what we *did* manage to extract — better to
-        # convert 4 of 5 decks than fail the whole upload.
-        combined: list[str] = []
-        for name, blob in apkg_candidates:
-            try:
-                inner_text, inner_media = _extract_anki_bundle(blob, dest)
-            except Exception:
-                continue
-            if inner_text.strip():
-                combined.append(inner_text)
-                media_count += inner_media
-        if combined:
-            return "\n".join(combined), media_count, contents
-
-    return None, media_count, contents
+    if decks:
+        names = _dedupe_deck_names([d[0] for d in decks])
+        decks = [(name, text) for name, (_, text) in zip(names, decks)]
+    return decks, media_count, contents
 
 
 def _fetch_blob_bytes(blob_url: str) -> bytes:
@@ -754,6 +791,14 @@ class handler(BaseHTTPRequestHandler):
 
         workdir: Optional[str] = None
         source_kind = "txt"
+        # When the upload is a flat zip carrying more than one deck-like
+        # entry (e.g. two .apkg files inside an "anki-decks-…zip"), we
+        # render each deck independently and bundle the rendered outputs
+        # into an outer zip so the user gets one file per deck back. The
+        # zip-extraction branch below populates ``per_deck_sides`` and
+        # flips this flag; everywhere else stays single-deck.
+        is_multi_deck = False
+        per_deck_sides: list[Tuple[str, list]] = []
         # Filename hint is used as a tiebreaker when content sniffing alone
         # can't distinguish (e.g. a single-file Notion .md export with no
         # toggles still wants the markdown parser, not the TSV parser).
@@ -812,12 +857,12 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     source_kind = "zip"
                     try:
-                        text, media_count, contents = _extract_zip_flat(
+                        decks, media_count, contents = _extract_zip_flat(
                             raw, Path(workdir)
                         )
                     except zipfile.BadZipFile:
                         return self._send_json_error(400, "uploaded file is not a valid .zip")
-                    if text is None:
+                    if not decks:
                         return self._send_json_error(
                             400,
                             "couldn't find a deck inside the zip (saw: "
@@ -826,7 +871,31 @@ class handler(BaseHTTPRequestHandler):
                             "(.txt)' export, a .csv/.tsv with the same shape, or "
                             "one or more .apkg files alongside the images.",
                         )
-                    sides = ats.read_cards_from_text(text, Path(workdir))
+                    if len(decks) > 1:
+                        # Multiple decks inside the zip — render each one
+                        # independently and bundle the outputs in an outer
+                        # zip so the user gets one file per deck back. The
+                        # full handling is below at the post-extraction
+                        # `is_multi_deck` branch.
+                        per_deck_sides = [
+                            (name, ats.read_cards_from_text(text, Path(workdir)))
+                            for name, text in decks
+                        ]
+                        per_deck_sides = [
+                            (name, sides_) for name, sides_ in per_deck_sides if sides_
+                        ]
+                        if not per_deck_sides:
+                            return self._send_json_error(
+                                400,
+                                "no cards found in any of the decks bundled "
+                                "inside the zip",
+                            )
+                        is_multi_deck = True
+                        # ``sides`` stays unset — multi-deck path renders
+                        # each deck's sides separately further down.
+                        sides = []
+                    else:
+                        sides = ats.read_cards_from_text(decks[0][1], Path(workdir))
                 media_dir = Path(workdir)
             else:
                 try:
@@ -866,7 +935,7 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     sides = ats.read_cards_from_text(text, media_dir)
 
-            if not sides:
+            if not is_multi_deck and not sides:
                 if source_kind in ("notion-html", "notion-md"):
                     return self._send_json_error(
                         400,
@@ -882,20 +951,27 @@ class handler(BaseHTTPRequestHandler):
                 )
 
             try:
-                if fmt == "pdf":
-                    payload = ats.render_pdf_bytes(sides)
-                elif fmt == "pptx":
-                    payload = ats.render_pptx_bytes(sides)
-                elif fmt == "png":
-                    payload = ats.render_png_zip_bytes(sides, stem=stem)
-                elif fmt == "apkg":
-                    payload = ats.render_apkg_bytes(sides, deck_name=stem)
-                elif fmt == "anki-txt":
-                    payload = ats.render_anki_txt_zip_bytes(sides, stem=stem)
-                else:  # pragma: no cover — guarded by SUPPORTED_FORMATS check
-                    return self._send_json_error(
-                        400, f"unsupported format: {fmt!r}"
+                if is_multi_deck:
+                    payload, total_slides = self._render_multi_deck(
+                        per_deck_sides, fmt
                     )
+                    sides = []  # tracked via total_slides for the response header
+                else:
+                    if fmt == "pdf":
+                        payload = ats.render_pdf_bytes(sides)
+                    elif fmt == "pptx":
+                        payload = ats.render_pptx_bytes(sides)
+                    elif fmt == "png":
+                        payload = ats.render_png_zip_bytes(sides, stem=stem)
+                    elif fmt == "apkg":
+                        payload = ats.render_apkg_bytes(sides, deck_name=stem)
+                    elif fmt == "anki-txt":
+                        payload = ats.render_anki_txt_zip_bytes(sides, stem=stem)
+                    else:  # pragma: no cover — guarded by SUPPORTED_FORMATS check
+                        return self._send_json_error(
+                            400, f"unsupported format: {fmt!r}"
+                        )
+                    total_slides = len(sides)
             except Exception as exc:  # surface rendering issues to the client
                 traceback.print_exc()
                 return self._send_json_error(500, f"render failed: {exc}")
@@ -903,24 +979,90 @@ class handler(BaseHTTPRequestHandler):
             if workdir is not None:
                 shutil.rmtree(workdir, ignore_errors=True)
 
-        filename = f"{stem}.{_EXT[fmt]}"
+        # When the upload had multiple decks bundled inside it, every
+        # individual deck output sits inside an outer zip — even formats
+        # that are normally single-file (PDF, PPTX, .apkg). The download
+        # is named ``<stem>.zip`` and advertises its true content type.
+        if is_multi_deck:
+            ext_out = "zip"
+            mime_out = "application/zip"
+        else:
+            ext_out = _EXT[fmt]
+            mime_out = _MIME[fmt]
+
+        filename = f"{stem}.{ext_out}"
         self.send_response(200)
-        self.send_header("Content-Type", _MIME[fmt])
+        self.send_header("Content-Type", mime_out)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header(
             "Content-Disposition", f'attachment; filename="{filename}"'
         )
-        self.send_header("X-Slide-Count", str(len(sides)))
+        self.send_header("X-Slide-Count", str(total_slides))
         self.send_header("X-Media-Count", str(media_count))
         self.send_header("X-Source-Kind", source_kind)
+        if is_multi_deck:
+            self.send_header("X-Deck-Count", str(len(per_deck_sides)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header(
             "Access-Control-Expose-Headers",
-            "X-Slide-Count, X-Media-Count, X-Source-Kind, Content-Disposition",
+            "X-Slide-Count, X-Media-Count, X-Source-Kind, X-Deck-Count, "
+            "Content-Disposition",
         )
         self.end_headers()
         self.wfile.write(payload)
+
+    def _render_multi_deck(
+        self,
+        per_deck_sides: list,
+        fmt: str,
+    ) -> Tuple[bytes, int]:
+        """Render each deck independently, bundle outputs in an outer zip.
+
+        Each ``(deck_name, sides)`` tuple in ``per_deck_sides`` becomes
+        one entry inside the returned zip:
+
+          - ``pdf``  → ``<deck_name>.pdf``
+          - ``pptx`` → ``<deck_name>.pptx``
+          - ``apkg`` → ``<deck_name>.apkg``
+          - ``png``  → ``<deck_name>.zip`` (the per-deck PNG zip), so the
+                       outer archive becomes a zip of zips. We could
+                       flatten by prefixing each PNG with the deck name,
+                       but keeping the per-deck zip preserves the
+                       ``slide_NNN.png`` numbering each user expects.
+          - ``anki-txt`` → ``<deck_name>.zip`` (per-deck txt+media zip);
+                       same reasoning — keep each deck's media bundle
+                       intact rather than flattening one massive zip.
+
+        Returns ``(zip_bytes, total_slide_count_across_all_decks)``.
+        """
+        buf = io.BytesIO()
+        total_slides = 0
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as outer:
+            for name, sides in per_deck_sides:
+                total_slides += len(sides)
+                if fmt == "pdf":
+                    outer.writestr(f"{name}.pdf", ats.render_pdf_bytes(sides))
+                elif fmt == "pptx":
+                    outer.writestr(f"{name}.pptx", ats.render_pptx_bytes(sides))
+                elif fmt == "png":
+                    outer.writestr(
+                        f"{name}.zip",
+                        ats.render_png_zip_bytes(sides, stem=name),
+                    )
+                elif fmt == "apkg":
+                    outer.writestr(
+                        f"{name}.apkg",
+                        ats.render_apkg_bytes(sides, deck_name=name),
+                    )
+                elif fmt == "anki-txt":
+                    outer.writestr(
+                        f"{name}.zip",
+                        ats.render_anki_txt_zip_bytes(sides, stem=name),
+                    )
+                else:  # pragma: no cover — guarded by SUPPORTED_FORMATS check
+                    raise ValueError(f"unsupported format: {fmt!r}")
+        return buf.getvalue(), total_slides
 
     def log_message(self, format: str, *args) -> None:  # silence default stderr spam
         return
