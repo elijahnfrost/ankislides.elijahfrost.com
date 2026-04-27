@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Anki → Slides</title>
-  <meta name="description" content="Convert an Anki plain-text card export into a 16:9 PDF, PowerPoint, or PNG slide deck. All conversion happens on the fly — nothing is stored." />
+  <title>Anki · Notion → Anything</title>
+  <meta name="description" content="Convert Anki exports or Notion toggle pages into 16:9 PDF, PowerPoint, PNG slide decks, or back into an Anki deck. All conversion happens on the fly — nothing is stored." />
   <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#faf8f5" media="(prefers-color-scheme: light)" />
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='none' stroke='%23e4dfd8' stroke-width='1.5'/><text x='16' y='21' text-anchor='middle' font-family='Cormorant Garamond, serif' font-weight='300' font-size='18' fill='%23e4dfd8'>A</text></svg>" />
@@ -263,6 +263,16 @@
       margin: 0 0.18em;
       letter-spacing: 0;
     }
+    .hero h1 .dot {
+      display: inline-block;
+      font-family: var(--font-inter);
+      font-weight: 300;
+      color: var(--color-fg-dim);
+      margin: 0 0.16em;
+      letter-spacing: 0;
+      vertical-align: 0.18em;
+      font-size: 0.55em;
+    }
     .hero .lede {
       max-width: 60ch;
       margin: 0 auto;
@@ -474,10 +484,19 @@
     .formats-wrap { margin-top: 56px; }
     .formats {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      /* Five output formats now (PDF / PPTX / PNG / .apkg / .txt+media).
+       * On wide viewports they sit on one row; on phones we wrap to 2-up
+       * so each tile keeps a comfortable target size. The bottom row of
+       * a 2-col layout would otherwise lose its right border because the
+       * outer container clips it — we restore it via .fmt:nth-child(odd)
+       * below in the @media block. */
+      grid-template-columns: repeat(5, 1fr);
       gap: 0;
       border: 1px solid var(--color-border-section);
       border-right: 0;
+    }
+    @media (max-width: 720px) {
+      .formats { grid-template-columns: repeat(2, 1fr); }
     }
     .fmt {
       border-right: 1px solid var(--color-border-section);
@@ -487,6 +506,12 @@
       background: transparent;
       transition: background-color 120ms linear, border-color 120ms linear;
       position: relative;
+    }
+    @media (max-width: 720px) {
+      /* Wrapping leaves the second-row tiles with no top border;
+       * the existing recipe relied on the outer container border. */
+      .fmt { border-top: 1px solid var(--color-border-section); }
+      .fmt:nth-child(-n+2) { border-top: 0; }
     }
     .fmt:hover { background: color-mix(in srgb, var(--color-fg) 2%, transparent); }
     .fmt.active {
@@ -731,10 +756,10 @@
   <div class="screen">
     <section class="hero fade-in-up delay-1">
       <h1>
-        Anki<span class="arrow">→</span><em>Slides</em>
+        Anki<span class="dot">·</span>Notion<span class="arrow">→</span><em>Anything</em>
       </h1>
       <p class="lede">
-        Front and back become separate slides, in order. 16:9 output. Nothing is stored.
+        Drop Anki exports or Notion toggle pages. Get back PDF, PowerPoint, PNG, or an Anki deck. Front and back become separate slides, in order. Nothing is stored.
       </p>
     </section>
 
@@ -752,12 +777,12 @@
         class="sr-only-input"
         type="file"
         multiple
-        accept=".txt,.zip,.apkg,text/plain,application/zip,application/octet-stream"
+        accept=".txt,.zip,.apkg,.html,.htm,.md,.markdown,text/plain,text/html,text/markdown,application/zip,application/octet-stream"
       />
       <label id="drop" class="drop fade-in-up delay-2" for="file-input">
         <div class="title">Click to choose <em>or drag files here</em></div>
         <div class="hint">
-          <code>.apkg</code> &middot; <code>.txt</code> (Notes or Cards in Plain Text) &middot; <code>.zip</code> of a <code>.txt</code> + media &middot; max 100 MB each &middot; multi-file OK
+          Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.zip</code> &middot; auto-detected &middot; max 100 MB each &middot; multi-file OK
         </div>
       </label>
 
@@ -787,6 +812,18 @@
             <div class="fmt-label">Images</div>
             <div class="fmt-title">PNG</div>
             <div class="fmt-sub">.zip of images</div>
+          </label>
+          <label class="fmt">
+            <input type="radio" name="format" value="apkg" />
+            <div class="fmt-label">Anki deck</div>
+            <div class="fmt-title">.apkg</div>
+            <div class="fmt-sub">Images bundled</div>
+          </label>
+          <label class="fmt">
+            <input type="radio" name="format" value="anki-txt" />
+            <div class="fmt-label">Anki text</div>
+            <div class="fmt-title">.txt + media</div>
+            <div class="fmt-sub">.zip</div>
           </label>
         </div>
       </div>
@@ -822,21 +859,39 @@
         </thead>
         <tbody>
           <tr>
-            <td>.apkg</td>
+            <td>Anki .apkg</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>.zip (+ media)</td>
+            <td>Anki .zip (+ media)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>.txt only</td>
+            <td>Anki .txt only</td>
             <td><span class="y">&check;</span></td>
             <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
+          </tr>
+          <tr>
+            <td>Notion .html</td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
+          </tr>
+          <tr>
+            <td>Notion .md</td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
+          </tr>
+          <tr>
+            <td>Notion .zip (+ images)</td>
+            <td><span class="y">&check;</span></td>
+            <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
         </tbody>
@@ -850,12 +905,13 @@
             <li>Audio &amp; video (<code>[sound:&hellip;]</code>)</li>
             <li>MathJax / LaTeX stays as raw source</li>
             <li>Tags, deck name, scheduling</li>
+            <li>Notion: only <code>&lt;details&gt;</code> toggles become cards &mdash; non-toggle blocks are ignored</li>
           </ul>
         </div>
 
       <div class="note">
         <div class="note-label">Preserved</div>
-        <p>Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved.</p>
+        <p>Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved. For Notion, the toggle summary becomes the front and the toggle's contents become the back; nested toggles each become their own card.</p>
       </div>
     </div>
   </section>
@@ -934,10 +990,31 @@
   // binary format as .apkg but containing the whole collection and all
   // media); almost always multi-GB and almost never what a user wants
   // for slides, so we reject it with guidance to use .apkg instead.
-  const ACCEPTED_EXTS = new Set([".apkg", ".zip", ".txt"]);
+  //
+  // Mixing Anki and Notion uploads in a single batch is fine — each file
+  // is auto-classified server-side; we don't ask the user what they're
+  // dropping.
+  const ACCEPTED_EXTS = new Set([
+    ".apkg", ".zip", ".txt",
+    ".html", ".htm", ".md", ".markdown",
+  ]);
 
   function fileExt(file) {
     return (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+  }
+
+  // Best-effort label for the source kind, shown in the per-file meta row
+  // (e.g. "ANKI .APKG" vs "NOTION .HTML"). Pure heuristics on the filename
+  // — the server still does its own content-based classification on every
+  // upload, so this is purely cosmetic.
+  function describeKind(file) {
+    const ext = fileExt(file);
+    if (ext === ".apkg") return "ANKI .APKG";
+    if (ext === ".html" || ext === ".htm") return "NOTION .HTML";
+    if (ext === ".md" || ext === ".markdown") return "NOTION .MD";
+    if (ext === ".txt") return "ANKI .TXT";
+    if (ext === ".zip") return ".ZIP (auto-detected)";
+    return (ext || "file").replace(".", "").toUpperCase();
   }
 
   function describeUnsupported(file) {
@@ -952,7 +1029,8 @@
     }
     return (
       "unsupported file type " + (ext || "(no extension)")
-      + " — drop an .apkg, a .txt, or a .zip containing a .txt plus media."
+      + " — drop an Anki export (.apkg / .txt / .zip) or a Notion export "
+      + "(.html / .md / .zip)."
     );
   }
 
@@ -1100,7 +1178,7 @@
       name.textContent = e.file.name;
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = formatBytes(e.file.size) + " · " + niceType(e.file);
+      meta.textContent = formatBytes(e.file.size) + " · " + describeKind(e.file);
       info.appendChild(name);
       info.appendChild(meta);
 
