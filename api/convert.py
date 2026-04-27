@@ -459,16 +459,55 @@ def _extract_notion_zip(body: bytes, dest: Path) -> Tuple[str, str, int]:
     return "", "notion-html", media_count
 
 
-def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
+def _decode_text_candidate(data: bytes) -> Optional[str]:
+    """Best-effort UTF-8 decode (with BOM fallback) for a zip entry's bytes."""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            return data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return None
+
+
+def _summarize_zip_contents(counts: dict) -> str:
+    """Render a short ``"3 .apkg, 12 .png, 1 .csv"`` summary for error messages."""
+    if not counts:
+        return "(empty)"
+    parts = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(
+        f"{n} {ext or '(no extension)'}" for ext, n in parts
+    )
+
+
+def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int, dict]:
     """Extract every file from ``body`` into ``dest`` using its basename.
 
-    Returns ``(txt_contents, media_file_count)``. If the archive contains
-    multiple ``.txt`` files we pick the largest (most likely the deck).
-    Directory-only entries, hidden files, and name collisions (later wins)
-    are ignored.
+    Returns ``(text, media_file_count, contents_by_ext)``. ``text`` is the
+    deck text we'll feed to the parser, sourced (in priority order) from:
+
+      1. A ``.txt`` entry — Anki's "Notes in Plain Text (.txt)" export.
+         If multiple are present we pick the largest.
+      2. A ``.csv``/``.tsv`` entry — same shape as the Anki .txt export
+         (tab-separated front/back), just a different extension. Some
+         Anki addons and cross-platform tools default to these.
+      3. One or more nested ``.apkg``/``.colpkg`` archives — we extract
+         each and concatenate their reconstructed TSVs. This is the
+         shape of a "batch export" of several decks bundled together
+         (e.g. ``anki-decks-<hash>.zip``); without this branch every such
+         upload failed with "no .txt file found inside the zip".
+
+    ``contents_by_ext`` is a ``{ext: count}`` map used to build a
+    diagnostic error message when we still can't find a payload.
+
+    Directory-only entries, hidden files, ``__MACOSX`` resource-fork
+    junk, and name collisions (later wins) are ignored.
     """
     txt_candidates: list[tuple[int, str]] = []  # (size, text)
+    csv_candidates: list[tuple[int, str]] = []
+    apkg_candidates: list[tuple[str, bytes]] = []  # (basename, raw bytes)
     media_count = 0
+    contents: dict[str, int] = {}
 
     with zipfile.ZipFile(io.BytesIO(body)) as zf:
         for info in zf.infolist():
@@ -482,17 +521,24 @@ def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
                 continue
 
             ext = os.path.splitext(basename)[1].lower()
+            contents[ext] = contents.get(ext, 0) + 1
             with zf.open(info, "r") as src:
                 data = src.read()
 
             if ext == ".txt":
-                try:
-                    txt_candidates.append((len(data), data.decode("utf-8")))
-                except UnicodeDecodeError:
-                    try:
-                        txt_candidates.append((len(data), data.decode("utf-8-sig")))
-                    except UnicodeDecodeError:
-                        continue
+                decoded = _decode_text_candidate(data)
+                if decoded is not None:
+                    txt_candidates.append((len(data), decoded))
+                continue
+
+            if ext in (".csv", ".tsv"):
+                decoded = _decode_text_candidate(data)
+                if decoded is not None:
+                    csv_candidates.append((len(data), decoded))
+                continue
+
+            if ext in (".apkg", ".colpkg"):
+                apkg_candidates.append((basename, data))
                 continue
 
             if ext in _IMAGE_EXTS:
@@ -501,9 +547,35 @@ def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
                     out.write(data)
                 media_count += 1
 
-    txt_candidates.sort(reverse=True)
-    text = txt_candidates[0][1] if txt_candidates else None
-    return text, media_count
+    if txt_candidates:
+        txt_candidates.sort(reverse=True)
+        return txt_candidates[0][1], media_count, contents
+
+    if csv_candidates:
+        csv_candidates.sort(reverse=True)
+        return csv_candidates[0][1], media_count, contents
+
+    if apkg_candidates:
+        # Concatenate the TSVs from every nested Anki bundle. Media files
+        # are extracted into ``dest`` by ``_extract_anki_bundle`` itself
+        # (using each bundle's media manifest to get original filenames),
+        # so ``<img src>`` references resolve as if the user had uploaded
+        # a single .apkg. If any individual bundle fails to parse we skip
+        # it and surface what we *did* manage to extract — better to
+        # convert 4 of 5 decks than fail the whole upload.
+        combined: list[str] = []
+        for name, blob in apkg_candidates:
+            try:
+                inner_text, inner_media = _extract_anki_bundle(blob, dest)
+            except Exception:
+                continue
+            if inner_text.strip():
+                combined.append(inner_text)
+                media_count += inner_media
+        if combined:
+            return "\n".join(combined), media_count, contents
+
+    return None, media_count, contents
 
 
 def _fetch_blob_bytes(blob_url: str) -> bytes:
@@ -740,14 +812,19 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     source_kind = "zip"
                     try:
-                        text, media_count = _extract_zip_flat(raw, Path(workdir))
+                        text, media_count, contents = _extract_zip_flat(
+                            raw, Path(workdir)
+                        )
                     except zipfile.BadZipFile:
                         return self._send_json_error(400, "uploaded file is not a valid .zip")
                     if text is None:
                         return self._send_json_error(
                             400,
-                            "no .txt file found inside the zip — include your Anki "
-                            "'Notes in Plain Text (.txt)' export alongside the images",
+                            "couldn't find a deck inside the zip (saw: "
+                            + _summarize_zip_contents(contents)
+                            + "). Include either an Anki 'Notes in Plain Text "
+                            "(.txt)' export, a .csv/.tsv with the same shape, or "
+                            "one or more .apkg files alongside the images.",
                         )
                     sides = ats.read_cards_from_text(text, Path(workdir))
                 media_dir = Path(workdir)

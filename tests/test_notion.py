@@ -174,5 +174,72 @@ class ApiDetectionTests(unittest.TestCase):
         self.assertFalse(self.api._is_notion_zip(body))
 
 
+class ZipFallbackTests(unittest.TestCase):
+    """The flat-zip extractor in api/convert.py also recognises .csv/.tsv
+    text exports and zips that bundle one or more nested .apkg archives — both
+    common shapes that previously failed with 'no .txt file found inside the
+    zip'.
+    """
+
+    def setUp(self):
+        self.api = _load_api_module()
+
+    def _make_apkg(self, front: str, back: str) -> bytes:
+        sides = ats.read_cards_from_notion_html(
+            f"<details><summary>{front}</summary>{back}</details>",
+            Path("/nonexistent"),
+        )
+        return ats.render_apkg_bytes(sides, deck_name="Inner")
+
+    def test_zip_with_nested_apkg_extracts_cards(self):
+        inner_a = self._make_apkg("Q1", "A1")
+        inner_b = self._make_apkg("Q2", "A2")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("deck-a.apkg", inner_a)
+            zf.writestr("subdir/deck-b.apkg", inner_b)
+        body = buf.getvalue()
+        # Plain anki-bundle detection looks at the *outer* zip and won't match.
+        self.assertFalse(self.api._is_anki_bundle(body))
+        with tempfile.TemporaryDirectory() as d:
+            text, _media, contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertIsNotNone(text)
+        sides = ats.read_cards_from_text(text, Path("/nonexistent"))
+        texts = {s.text for s in sides}
+        self.assertIn("Q1", texts)
+        self.assertIn("A1", texts)
+        self.assertIn("Q2", texts)
+        self.assertIn("A2", texts)
+        self.assertEqual(contents.get(".apkg"), 2)
+
+    def test_zip_with_csv_export_is_accepted(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("deck.csv", "Front\tBack\nQ1\tA1\n")
+            zf.writestr("logo.png", b"\x89PNG\r\n\x1a\n")
+        body = buf.getvalue()
+        with tempfile.TemporaryDirectory() as d:
+            text, media, contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertIsNotNone(text)
+        self.assertEqual(media, 1)
+        self.assertEqual(contents.get(".csv"), 1)
+        # The csv shape parses identically to the Anki txt export.
+        sides = ats.read_cards_from_text(text, Path("/nonexistent"))
+        self.assertEqual([s.text for s in sides[-2:]], ["Q1", "A1"])
+
+    def test_zip_with_no_deck_returns_diagnostic_summary(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("logo.png", b"\x89PNG\r\n\x1a\n")
+            zf.writestr("notes.pdf", b"%PDF-1.4")
+        body = buf.getvalue()
+        with tempfile.TemporaryDirectory() as d:
+            text, _media, contents = self.api._extract_zip_flat(body, Path(d))
+        self.assertIsNone(text)
+        summary = self.api._summarize_zip_contents(contents)
+        self.assertIn(".png", summary)
+        self.assertIn(".pdf", summary)
+
+
 if __name__ == "__main__":
     unittest.main()
