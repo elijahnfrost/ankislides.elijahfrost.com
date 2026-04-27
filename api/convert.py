@@ -91,14 +91,23 @@ _BLOB_FETCH_TIMEOUT = 25  # seconds — well under the 60 s function timeout
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
+_NOTION_TEXT_EXTS = {".html", ".htm", ".md", ".markdown"}
 
 _MIME = {
     "pdf": "application/pdf",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "png": "application/zip",
+    "apkg": "application/octet-stream",
+    "anki-txt": "application/zip",
 }
 
-_EXT = {"pdf": "pdf", "pptx": "pptx", "png": "zip"}
+_EXT = {
+    "pdf": "pdf",
+    "pptx": "pptx",
+    "png": "zip",
+    "apkg": "apkg",
+    "anki-txt": "zip",
+}
 
 _SAFE_STEM = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -127,6 +136,38 @@ def _is_anki_bundle(body: bytes) -> bool:
     except zipfile.BadZipFile:
         return False
     return any(n in names for n in _ANKI_DB_NAMES)
+
+
+_NOTION_DETAILS_RE = re.compile(rb"<details\b", re.IGNORECASE)
+
+
+def _looks_like_notion_html(body: bytes) -> bool:
+    """Heuristic for single-file Notion exports: contains a ``<details>`` toggle."""
+    return bool(_NOTION_DETAILS_RE.search(body[:65536]))
+
+
+def _is_notion_zip(body: bytes) -> bool:
+    """A zip is a Notion export if it carries any ``.html``/``.md`` entries.
+
+    Notion's "Export as Markdown & CSV" produces a zip of ``.md`` files plus
+    image folders; "Export as HTML" produces a zip of ``.html`` files plus
+    image folders. Either signal is enough — Anki's ``.apkg`` was already
+    matched ahead of us by ``_is_anki_bundle``, and a plain Anki txt+media
+    zip won't contain ``.md`` or ``.html`` files.
+    """
+    if not _looks_like_zip(body):
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(body)) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                ext = os.path.splitext(info.filename)[1].lower()
+                if ext in _NOTION_TEXT_EXTS:
+                    return True
+    except zipfile.BadZipFile:
+        return False
+    return False
 
 
 def _zstd_decompress(raw: bytes) -> bytes:
@@ -347,6 +388,75 @@ def _extract_anki_bundle(body: bytes, dest: Path) -> Tuple[str, int]:
         pass
 
     return buf.getvalue(), media_count
+
+
+def _extract_notion_zip(body: bytes, dest: Path) -> Tuple[str, str, int]:
+    """Extract a Notion HTML/Markdown export zip into ``dest``.
+
+    Returns ``(combined_text, kind, media_count)`` where ``kind`` is either
+    ``"notion-html"`` or ``"notion-md"`` based on which payload type
+    dominates the archive. All ``.html``/``.md`` files are concatenated in
+    archive order (with a separating blank line); images are flattened into
+    ``dest`` by basename so ``<img src>`` references resolve.
+
+    Notion exports nest images in folders named after the page title (e.g.
+    ``My Page abc123/foo.png``). We flatten by basename — the same strategy
+    ``_extract_zip_flat`` uses for Anki txt+media zips.
+    """
+    html_chunks: list[tuple[str, str]] = []  # (filename, text)
+    md_chunks: list[tuple[str, str]] = []
+    media_count = 0
+
+    with zipfile.ZipFile(io.BytesIO(body)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            basename = os.path.basename(info.filename)
+            if not basename or basename.startswith("."):
+                continue
+            if "__MACOSX" in info.filename.split("/"):
+                continue
+
+            ext = os.path.splitext(basename)[1].lower()
+            with zf.open(info, "r") as src:
+                data = src.read()
+
+            if ext in (".html", ".htm"):
+                try:
+                    html_chunks.append((info.filename, data.decode("utf-8")))
+                except UnicodeDecodeError:
+                    try:
+                        html_chunks.append((info.filename, data.decode("utf-8-sig")))
+                    except UnicodeDecodeError:
+                        continue
+                continue
+
+            if ext in (".md", ".markdown"):
+                try:
+                    md_chunks.append((info.filename, data.decode("utf-8")))
+                except UnicodeDecodeError:
+                    try:
+                        md_chunks.append((info.filename, data.decode("utf-8-sig")))
+                    except UnicodeDecodeError:
+                        continue
+                continue
+
+            if ext in _IMAGE_EXTS:
+                out_path = dest / basename
+                try:
+                    with open(out_path, "wb") as out:
+                        out.write(data)
+                    media_count += 1
+                except OSError:
+                    continue
+
+    html_chunks.sort(key=lambda t: t[0])
+    md_chunks.sort(key=lambda t: t[0])
+    if html_chunks:
+        return "\n\n".join(text for _, text in html_chunks), "notion-html", media_count
+    if md_chunks:
+        return "\n\n".join(text for _, text in md_chunks), "notion-md", media_count
+    return "", "notion-html", media_count
 
 
 def _extract_zip_flat(body: bytes, dest: Path) -> Tuple[Optional[str], int]:
@@ -572,6 +682,10 @@ class handler(BaseHTTPRequestHandler):
 
         workdir: Optional[str] = None
         source_kind = "txt"
+        # Filename hint is used as a tiebreaker when content sniffing alone
+        # can't distinguish (e.g. a single-file Notion .md export with no
+        # toggles still wants the markdown parser, not the TSV parser).
+        name_lower = raw_filename.lower() if raw_filename else ""
         try:
             if _looks_like_zip(raw):
                 workdir = tempfile.mkdtemp(prefix="anki-slides-")
@@ -606,6 +720,23 @@ class handler(BaseHTTPRequestHandler):
                         return self._send_json_error(
                             400, "the Anki bundle contains no notes"
                         )
+                    sides = ats.read_cards_from_text(text, Path(workdir))
+                elif _is_notion_zip(raw):
+                    try:
+                        text, source_kind, media_count = _extract_notion_zip(
+                            raw, Path(workdir)
+                        )
+                    except zipfile.BadZipFile:
+                        return self._send_json_error(400, "uploaded file is not a valid .zip")
+                    if not text.strip():
+                        return self._send_json_error(
+                            400,
+                            "the Notion export zip contains no .html or .md pages",
+                        )
+                    if source_kind == "notion-md":
+                        sides = ats.read_cards_from_notion_markdown(text, Path(workdir))
+                    else:
+                        sides = ats.read_cards_from_notion_html(text, Path(workdir))
                 else:
                     source_kind = "zip"
                     try:
@@ -618,6 +749,7 @@ class handler(BaseHTTPRequestHandler):
                             "no .txt file found inside the zip — include your Anki "
                             "'Notes in Plain Text (.txt)' export alongside the images",
                         )
+                    sides = ats.read_cards_from_text(text, Path(workdir))
                 media_dir = Path(workdir)
             else:
                 try:
@@ -628,17 +760,42 @@ class handler(BaseHTTPRequestHandler):
                     except UnicodeDecodeError:
                         return self._send_json_error(
                             400,
-                            "unrecognized upload — expected a .txt, .zip, or .apkg",
+                            "unrecognized upload — expected a .txt, .zip, .apkg, "
+                            ".html, or .md (Notion export)",
                         )
                 media_count = 0
                 media_dir = Path("/nonexistent-media")
 
-            sides = ats.read_cards_from_text(text, media_dir)
+                ext = os.path.splitext(name_lower)[1] if name_lower else ""
+                # Prefer the filename extension for routing (a .md with
+                # <details> needs the markdown image-syntax pre-pass that
+                # the HTML branch skips). Fall back to content sniffing
+                # for unhinted uploads.
+                if ext in (".md", ".markdown"):
+                    source_kind = "notion-md"
+                    sides = ats.read_cards_from_notion_markdown(text, media_dir)
+                elif ext in (".html", ".htm"):
+                    source_kind = "notion-html"
+                    sides = ats.read_cards_from_notion_html(text, media_dir)
+                elif _looks_like_notion_html(raw):
+                    source_kind = "notion-html"
+                    sides = ats.read_cards_from_notion_html(text, media_dir)
+                else:
+                    sides = ats.read_cards_from_text(text, media_dir)
+
             if not sides:
+                if source_kind in ("notion-html", "notion-md"):
+                    return self._send_json_error(
+                        400,
+                        "no cards found — Notion exports must contain at least "
+                        "one toggle block (the front becomes the toggle title, "
+                        "the back becomes its contents)",
+                    )
                 return self._send_json_error(
                     400,
                     "no cards found — expected tab-separated rows (front <TAB> back) "
-                    "exported from Anki as 'Notes in Plain Text (.txt)'",
+                    "exported from Anki as 'Notes in Plain Text (.txt)', or a "
+                    "Notion export with toggle blocks",
                 )
 
             try:
@@ -646,9 +803,18 @@ class handler(BaseHTTPRequestHandler):
                     payload = ats.render_pdf_bytes(sides)
                 elif fmt == "pptx":
                     payload = ats.render_pptx_bytes(sides)
-                else:
+                elif fmt == "png":
                     payload = ats.render_png_zip_bytes(sides, stem=stem)
+                elif fmt == "apkg":
+                    payload = ats.render_apkg_bytes(sides, deck_name=stem)
+                elif fmt == "anki-txt":
+                    payload = ats.render_anki_txt_zip_bytes(sides, stem=stem)
+                else:  # pragma: no cover — guarded by SUPPORTED_FORMATS check
+                    return self._send_json_error(
+                        400, f"unsupported format: {fmt!r}"
+                    )
             except Exception as exc:  # surface rendering issues to the client
+                traceback.print_exc()
                 return self._send_json_error(500, f"render failed: {exc}")
         finally:
             if workdir is not None:
