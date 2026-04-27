@@ -695,19 +695,55 @@
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
-      border-bottom-color: var(--color-border);
       padding-bottom: 14px;
     }
+    /* Column-header row sits flush against the first section title;
+     * the section title's own bottom border then provides the single
+     * divider before the data rows. Without this override, the column
+     * header row and the section title row would each draw their own
+     * bottom border 1.5em apart, which reads as a doubled rule. */
+    .reference table.ref thead th { border-bottom: 0; }
     .reference table.ref tr:last-child td { border-bottom: 0; }
     .reference table.ref td .y { color: var(--color-fg); }
     .reference table.ref td .n { color: var(--color-fg-dim); }
+    .reference table.ref td .x { color: var(--color-fg-dim); }
+    /* Section header rows split the table into "Anki" and "Notion"
+     * groups. They're a single full-width <th colspan> with the same
+     * uppercase-micro-type as the column headers, slightly more space
+     * above so the eye reads them as group titles, not column titles. */
+    .reference table.ref tr.section th {
+      text-align: left;
+      padding: 28px 0 12px;
+      font-family: var(--font-inter);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-fg);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .reference table.ref tr.section.first th { padding-top: 0; }
+    /* Rows for unsupported inputs read as muted, with the format name
+     * struck through so it's unmistakable that picking this option in
+     * Notion (or exporting this Anki shape) won't work here. */
+    .reference table.ref tr.unsupported td {
+      color: var(--color-fg-dim);
+    }
+    .reference table.ref tr.unsupported td:first-child {
+      color: var(--color-fg-dim);
+      text-decoration: line-through;
+      text-decoration-color: var(--color-fg-dim);
+    }
 
     /* Notes live side-by-side under the table on desktop, stacked on
      * narrow widths. Same divider style as the table above so the
-     * bottom section reads as one typographic block. */
+     * bottom section reads as one typographic block. ``auto-fit`` lets
+     * the panel flow to N columns based on width (3 wide / 2 medium /
+     * 1 narrow) so adding or removing a note doesn't orphan one card on
+     * its own row. */
     .reference .notes {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 56px;
       margin-top: 48px;
     }
@@ -731,20 +767,24 @@
       padding: 0;
       list-style: none;
     }
+    /* Bullet is an absolutely positioned dot rather than a flex item so
+     * inline children (``<code>``, ``<em>``) stay on the same baseline as
+     * the surrounding text. The previous flex layout treated each child
+     * element as its own column, which shattered any bullet containing
+     * inline ``<code>`` into several stacked text fragments. */
     .reference .drop-list li {
-      display: flex;
-      gap: 12px;
-      padding: 5px 0;
+      position: relative;
+      padding: 5px 0 5px 15px;
     }
     .reference .drop-list li::before {
       content: "";
-      display: inline-block;
+      position: absolute;
+      left: 0;
+      top: 0.95em;
       width: 3px;
       height: 3px;
       border-radius: 50%;
       background: var(--color-bullet);
-      flex-shrink: 0;
-      margin-top: 10px;
     }
     .reference .note p { margin: 0; }
     .reference code {
@@ -811,12 +851,12 @@
         class="sr-only-input"
         type="file"
         multiple
-        accept=".txt,.zip,.apkg,.html,.htm,.md,.markdown,text/plain,text/html,text/markdown,application/zip,application/octet-stream"
+        accept=".txt,.zip,.apkg,.html,.htm,.md,.markdown,.csv,.tsv,text/plain,text/html,text/markdown,text/csv,application/zip,application/octet-stream"
       />
       <label id="drop" class="drop fade-in-up delay-2" for="file-input">
         <div class="title">Click to choose <em>or drag files here</em></div>
         <div class="hint">
-          Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.zip</code> &middot; pick an output format per file &middot; max 100 MB each
+          Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.csv</code> / <code>.zip</code> &middot; pick an output format per file &middot; max 100 MB each
         </div>
       </label>
 
@@ -852,41 +892,50 @@
           </tr>
         </thead>
         <tbody>
+          <tr class="section first"><th colspan="4">Anki <span aria-hidden="true">&middot;</span> File &rsaquo; Export &rsaquo; Current deck</th></tr>
           <tr>
-            <td>Anki .apkg</td>
+            <td>.apkg</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>Anki .zip (+ media)</td>
+            <td>.zip (+ media)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>Anki .txt only</td>
+            <td>.txt (Notes in Plain Text)</td>
             <td><span class="y">&check;</span></td>
             <td><span class="n">&mdash;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
+          <tr class="unsupported">
+            <td>.colpkg (collection backup)</td>
+            <td><span class="x">&times;</span></td>
+            <td><span class="x">&times;</span></td>
+            <td><span class="x">&times;</span></td>
+          </tr>
+
+          <tr class="section"><th colspan="4">Notion <span aria-hidden="true">&middot;</span> &hellip; &rsaquo; Export &rsaquo; Export format</th></tr>
           <tr>
-            <td>Notion .html</td>
+            <td>HTML</td>
             <td><span class="y">&check;</span></td>
-            <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
           <tr>
-            <td>Notion .md</td>
+            <td>Markdown &amp; CSV</td>
             <td><span class="y">&check;</span></td>
-            <td><span class="n">&mdash;</span></td>
+            <td><span class="y">&check;</span></td>
             <td><span class="y">&check;</span></td>
           </tr>
-          <tr>
-            <td>Notion .zip (+ images)</td>
-            <td><span class="y">&check;</span></td>
-            <td><span class="y">&check;</span></td>
-            <td><span class="y">&check;</span></td>
+          <tr class="unsupported">
+            <td>PDF</td>
+            <td><span class="x">&times;</span></td>
+            <td><span class="x">&times;</span></td>
+            <td><span class="x">&times;</span></td>
           </tr>
         </tbody>
       </table>
@@ -899,13 +948,22 @@
             <li>Audio &amp; video (<code>[sound:&hellip;]</code>)</li>
             <li>MathJax / LaTeX stays as raw source</li>
             <li>Tags, deck name, scheduling</li>
-            <li>Notion: only <code>&lt;details&gt;</code> toggles become cards &mdash; non-toggle blocks are ignored</li>
+            <li>Notion HTML / Markdown: only <code>&lt;details&gt;</code> toggles become cards &mdash; non-toggle blocks are ignored</li>
+            <li>Notion CSV (database alone): only the first two columns are used &mdash; the header row and extra property columns are ignored</li>
           </ul>
         </div>
 
       <div class="note">
+        <div class="note-label">Why some inputs aren't supported</div>
+        <ul class="drop-list">
+          <li>Anki <code>.colpkg</code> is a full-profile backup carrying every deck and every media file in your collection &mdash; routinely multi-GB. Use <em>File &rsaquo; Export &rsaquo; Current deck &rsaquo; Anki Deck Package (.apkg)</em> instead.</li>
+          <li>Notion PDF flattens toggles into static blocks during export, so the front/back boundary is gone. Pick HTML or Markdown &amp; CSV instead.</li>
+        </ul>
+      </div>
+
+      <div class="note">
         <div class="note-label">Preserved</div>
-        <p>Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved. For Notion, the toggle summary becomes the front and the toggle's contents become the back; nested toggles each become their own card.</p>
+        <p>Cloze deletions <code>{{c1::&hellip;}}</code> are unwrapped to the answer text. Line breaks &amp; <code>&lt;br&gt;</code> are preserved. For Notion toggle pages the summary becomes the front and the toggle's contents become the back; nested toggles each become their own card. Multi&#8209;page Notion <code>.zip</code> exports (one zip per page inside an outer zip) are unpacked recursively.</p>
       </div>
     </div>
   </section>
@@ -988,6 +1046,7 @@
     "anki-zip":   ["pdf", "pptx", "png", "apkg", "anki-txt"],
     "notion-html":["pdf", "pptx", "png", "apkg", "anki-txt"],
     "notion-md":  ["pdf", "pptx", "png", "apkg", "anki-txt"],
+    "csv":        ["pdf", "pptx", "png", "apkg", "anki-txt"],
     "unknown":    ["pdf", "pptx", "png", "apkg", "anki-txt"],
   };
 
@@ -997,6 +1056,7 @@
     if (ext === ".txt") return "anki-txt";
     if (ext === ".html" || ext === ".htm") return "notion-html";
     if (ext === ".md" || ext === ".markdown") return "notion-md";
+    if (ext === ".csv" || ext === ".tsv") return "csv";
     if (ext === ".zip") return "anki-zip"; // covers Notion zips too — server settles it
     return "unknown";
   }
@@ -1045,6 +1105,7 @@
   const ACCEPTED_EXTS = new Set([
     ".apkg", ".zip", ".txt",
     ".html", ".htm", ".md", ".markdown",
+    ".csv", ".tsv",
   ]);
 
   function fileExt(file) {
@@ -1060,6 +1121,8 @@
     if (ext === ".apkg") return "ANKI .APKG";
     if (ext === ".html" || ext === ".htm") return "NOTION .HTML";
     if (ext === ".md" || ext === ".markdown") return "NOTION .MD";
+    if (ext === ".csv") return "NOTION .CSV";
+    if (ext === ".tsv") return ".TSV";
     if (ext === ".txt") return "ANKI .TXT";
     if (ext === ".zip") return ".ZIP (auto-detected)";
     return (ext || "file").replace(".", "").toUpperCase();
@@ -1078,7 +1141,7 @@
     return (
       "unsupported file type " + (ext || "(no extension)")
       + " — drop an Anki export (.apkg / .txt / .zip) or a Notion export "
-      + "(.html / .md / .zip)."
+      + "(.html / .md / .csv / .zip)."
     );
   }
 

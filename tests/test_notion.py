@@ -173,6 +173,52 @@ class ApiDetectionTests(unittest.TestCase):
         body = buf.getvalue()
         self.assertFalse(self.api._is_notion_zip(body))
 
+    def test_nested_notion_zip_is_detected_and_extracted(self):
+        """Notion's "Export everything" can wrap one zip per page inside an
+        outer archive. The dispatcher must still pick the Notion code path
+        in that shape (rather than falling through to the "couldn't find a
+        deck" diagnostic the user previously hit)."""
+        # Inner zip: one page's HTML export plus its image folder.
+        inner = io.BytesIO()
+        with zipfile.ZipFile(inner, "w") as zf:
+            zf.writestr(
+                "Spinal Cord abc/page.html",
+                "<details><summary>Q1</summary>"
+                "A1<img src=\"diagram.png\"></details>",
+            )
+            zf.writestr("Spinal Cord abc/diagram.png", b"\x89PNG\r\n\x1a\n")
+        # Outer zip carrying just the inner zip — exactly the shape that
+        # produced the original bug report.
+        outer = io.BytesIO()
+        with zipfile.ZipFile(outer, "w") as zf:
+            zf.writestr("Spinal Cord.zip", inner.getvalue())
+        body = outer.getvalue()
+        self.assertTrue(self.api._is_notion_zip(body))
+        with tempfile.TemporaryDirectory() as d:
+            text, kind, mc = self.api._extract_notion_zip(body, Path(d))
+            self.assertEqual(kind, "notion-html")
+            self.assertEqual(mc, 1)
+            self.assertIn("<details>", text)
+            self.assertTrue((Path(d) / "diagram.png").is_file())
+
+    def test_nested_zip_recursion_capped(self):
+        """Pathological deep nesting must terminate without recursing
+        forever (zip-bomb defence)."""
+        # Build a chain of empty zips, each wrapping the next, deeper than
+        # the depth cap. None of them contain html/md so detection should
+        # return False — but importantly it should *return*, not blow the
+        # stack.
+        inner_bytes = b""
+        for i in range(8):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zf:
+                if inner_bytes:
+                    zf.writestr(f"layer-{i}.zip", inner_bytes)
+                else:
+                    zf.writestr("readme.txt", b"empty")
+            inner_bytes = buf.getvalue()
+        self.assertFalse(self.api._is_notion_zip(inner_bytes))
+
 
 class ZipFallbackTests(unittest.TestCase):
     """The flat-zip extractor in api/convert.py also recognises .csv/.tsv
@@ -234,6 +280,48 @@ class ZipFallbackTests(unittest.TestCase):
         # The csv shape parses identically to the Anki txt export.
         sides = ats.read_cards_from_text(decks[0][1], Path("/nonexistent"))
         self.assertEqual([s.text for s in sides[-2:]], ["Q1", "A1"])
+
+    def test_zip_with_notion_database_csv_drops_header_and_parses_rows(self):
+        """A Notion database CSV is comma-separated and starts with a
+        ``Name,…`` header. It should be auto-detected and the header
+        should be dropped before parsing."""
+        buf = io.BytesIO()
+        notion_csv = (
+            "Name,Tags,Created\r\n"
+            "Vertebral column,Anatomy,2024-01-01\r\n"
+            "Spinal cord,Anatomy,2024-01-02\r\n"
+        )
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("MyDatabase.csv", notion_csv)
+        body = buf.getvalue()
+        with tempfile.TemporaryDirectory() as d:
+            decks, _media, _contents = self.api._extract_zip_flat(
+                body, Path(d)
+            )
+        self.assertEqual(len(decks), 1)
+        sides = ats.read_cards_from_text(decks[0][1], Path("/nonexistent"))
+        # Two rows -> 4 sides (front+back each), Name header should be gone.
+        fronts = [s.text for s in sides[::2]]
+        self.assertEqual(fronts, ["Vertebral column", "Spinal cord"])
+        self.assertNotIn("Name", fronts)
+
+    def test_csv_helper_keeps_anki_tsv_unchanged_shape(self):
+        """A real Anki TSV export starts with a card row, not a header — the
+        helper must not eat the first row in that case."""
+        anki_txt = "Q1\tA1\nQ2\tA2\n"
+        normalised = self.api._csv_text_to_tsv(anki_txt)
+        sides = ats.read_cards_from_text(normalised, Path("/nonexistent"))
+        self.assertEqual([s.text for s in sides], ["Q1", "A1", "Q2", "A2"])
+
+    def test_csv_helper_handles_quoted_commas(self):
+        normalised = self.api._csv_text_to_tsv(
+            'Front,Back\r\n"Hello, world","A greeting"\r\n'
+        )
+        sides = ats.read_cards_from_text(normalised, Path("/nonexistent"))
+        # "Front" header is in our whitelist, so it gets dropped.
+        self.assertEqual(
+            [s.text for s in sides], ["Hello, world", "A greeting"]
+        )
 
     def test_zip_with_no_deck_returns_diagnostic_summary(self):
         buf = io.BytesIO()

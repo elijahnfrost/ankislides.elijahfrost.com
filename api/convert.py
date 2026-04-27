@@ -92,6 +92,12 @@ _BLOB_FETCH_TIMEOUT = 25  # seconds — well under the 60 s function timeout
 _ZIP_MAGIC = b"PK\x03\x04"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 _NOTION_TEXT_EXTS = {".html", ".htm", ".md", ".markdown"}
+# Hard cap on how deep we'll recurse into nested ``.zip`` entries while
+# unpacking a Notion-style export. Notion's "Export everything" produces
+# at most one level of nesting (top-level zip → per-page zips), but we
+# leave one extra layer of headroom; anything beyond is almost certainly
+# either a zip-bomb attempt or a packaging mistake.
+_MAX_NOTION_ZIP_DEPTH = 4
 
 _MIME = {
     "pdf": "application/pdf",
@@ -146,7 +152,7 @@ def _looks_like_notion_html(body: bytes) -> bool:
     return bool(_NOTION_DETAILS_RE.search(body[:65536]))
 
 
-def _is_notion_zip(body: bytes) -> bool:
+def _is_notion_zip(body: bytes, _depth: int = 0) -> bool:
     """A zip is a Notion export if it carries any ``.html``/``.md`` entries.
 
     Notion's "Export as Markdown & CSV" produces a zip of ``.md`` files plus
@@ -154,8 +160,15 @@ def _is_notion_zip(body: bytes) -> bool:
     image folders. Either signal is enough — Anki's ``.apkg`` was already
     matched ahead of us by ``_is_anki_bundle``, and a plain Anki txt+media
     zip won't contain ``.md`` or ``.html`` files.
+
+    Notion's "Export everything" can also wrap one nested ``.zip`` per page
+    inside an outer archive — we recurse so the dispatcher still picks the
+    Notion code path in that shape (instead of falling through to the
+    "unrecognised zip" diagnostic).
     """
     if not _looks_like_zip(body):
+        return False
+    if _depth >= _MAX_NOTION_ZIP_DEPTH:
         return False
     try:
         with zipfile.ZipFile(io.BytesIO(body)) as zf:
@@ -165,6 +178,14 @@ def _is_notion_zip(body: bytes) -> bool:
                 ext = os.path.splitext(info.filename)[1].lower()
                 if ext in _NOTION_TEXT_EXTS:
                     return True
+                if ext == ".zip":
+                    try:
+                        with zf.open(info, "r") as inner:
+                            inner_bytes = inner.read()
+                    except (zipfile.BadZipFile, KeyError, OSError):
+                        continue
+                    if _is_notion_zip(inner_bytes, _depth + 1):
+                        return True
     except zipfile.BadZipFile:
         return False
     return False
@@ -402,53 +423,72 @@ def _extract_notion_zip(body: bytes, dest: Path) -> Tuple[str, str, int]:
     Notion exports nest images in folders named after the page title (e.g.
     ``My Page abc123/foo.png``). We flatten by basename — the same strategy
     ``_extract_zip_flat`` uses for Anki txt+media zips.
+
+    When the upload is Notion's multi-page "Export everything" shape
+    (a top-level zip whose entries are themselves per-page zips) we
+    descend into each inner zip and merge the results, capped at
+    ``_MAX_NOTION_ZIP_DEPTH`` levels so a malicious zip-bomb can't run us
+    out of memory.
     """
     html_chunks: list[tuple[str, str]] = []  # (filename, text)
     md_chunks: list[tuple[str, str]] = []
     media_count = 0
 
-    with zipfile.ZipFile(io.BytesIO(body)) as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            basename = os.path.basename(info.filename)
-            if not basename or basename.startswith("."):
-                continue
-            if "__MACOSX" in info.filename.split("/"):
-                continue
-
-            ext = os.path.splitext(basename)[1].lower()
-            with zf.open(info, "r") as src:
-                data = src.read()
-
-            if ext in (".html", ".htm"):
-                try:
-                    html_chunks.append((info.filename, data.decode("utf-8")))
-                except UnicodeDecodeError:
-                    try:
-                        html_chunks.append((info.filename, data.decode("utf-8-sig")))
-                    except UnicodeDecodeError:
-                        continue
-                continue
-
-            if ext in (".md", ".markdown"):
-                try:
-                    md_chunks.append((info.filename, data.decode("utf-8")))
-                except UnicodeDecodeError:
-                    try:
-                        md_chunks.append((info.filename, data.decode("utf-8-sig")))
-                    except UnicodeDecodeError:
-                        continue
-                continue
-
-            if ext in _IMAGE_EXTS:
-                out_path = dest / basename
-                try:
-                    with open(out_path, "wb") as out:
-                        out.write(data)
-                    media_count += 1
-                except OSError:
+    def _walk(blob: bytes, prefix: str, depth: int) -> None:
+        nonlocal media_count
+        if depth >= _MAX_NOTION_ZIP_DEPTH:
+            return
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(blob))
+        except zipfile.BadZipFile:
+            return
+        with zf:
+            for info in zf.infolist():
+                if info.is_dir():
                     continue
+                basename = os.path.basename(info.filename)
+                if not basename or basename.startswith("."):
+                    continue
+                if "__MACOSX" in info.filename.split("/"):
+                    continue
+
+                ext = os.path.splitext(basename)[1].lower()
+                try:
+                    with zf.open(info, "r") as src:
+                        data = src.read()
+                except (zipfile.BadZipFile, KeyError, OSError):
+                    continue
+
+                # Sort key keeps inner-page chunks grouped underneath
+                # their outer-zip neighbours rather than interleaved.
+                tag = f"{prefix}/{info.filename}" if prefix else info.filename
+
+                if ext == ".zip":
+                    _walk(data, tag, depth + 1)
+                    continue
+
+                if ext in (".html", ".htm"):
+                    decoded = _decode_text_candidate(data)
+                    if decoded is not None:
+                        html_chunks.append((tag, decoded))
+                    continue
+
+                if ext in (".md", ".markdown"):
+                    decoded = _decode_text_candidate(data)
+                    if decoded is not None:
+                        md_chunks.append((tag, decoded))
+                    continue
+
+                if ext in _IMAGE_EXTS:
+                    out_path = dest / basename
+                    try:
+                        with open(out_path, "wb") as out:
+                            out.write(data)
+                        media_count += 1
+                    except OSError:
+                        continue
+
+    _walk(body, "", 0)
 
     html_chunks.sort(key=lambda t: t[0])
     md_chunks.sort(key=lambda t: t[0])
@@ -468,6 +508,67 @@ def _decode_text_candidate(data: bytes) -> Optional[str]:
             return data.decode("utf-8-sig")
         except UnicodeDecodeError:
             return None
+
+
+# Strings that, in the *first row* of a CSV, strongly indicate a header
+# rather than a real card. We drop the header when the very first cell is
+# any of these (case-insensitive) — covers Notion's database-name column
+# (almost always literally ``Name``), the Anki "Front,Back" template, and
+# the typical "Question,Answer" shape from cross-platform tools.
+_CSV_HEADER_FIRST_CELL = {
+    "name", "title", "front", "question", "term", "word", "card front",
+}
+
+
+def _csv_text_to_tsv(raw_text: str) -> str:
+    """Normalise a comma- or tab-separated table into the TSV shape
+    ``read_cards_from_text`` expects.
+
+    Notion exports databases as comma-separated CSVs with a header row
+    (``Name,Tags,Created,…``); Anki's "Notes in Plain Text" export is
+    tab-separated with no header. ``csv.Sniffer`` picks the delimiter
+    from the first ~4 KB; if it can't decide, comma is the safer default
+    because the existing TSV path already handles tabs natively.
+
+    Only the first two columns survive — every other property column
+    becomes irrelevant for a front/back flashcard. Empty rows are
+    dropped. A header row is recognised heuristically and skipped: we
+    match the first cell against a small whitelist (``Name``, ``Front``,
+    ``Question``, …) so we don't accidentally drop a real card whose
+    front happens to look like a single short phrase.
+    """
+    if not raw_text:
+        return ""
+    sample = raw_text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+        delim = dialect.delimiter
+    except csv.Error:
+        delim = "\t" if "\t" in sample else ","
+    rows: list[list[str]] = []
+    reader = csv.reader(io.StringIO(raw_text), delimiter=delim, quotechar='"')
+    for row in reader:
+        if not row or not any(c.strip() for c in row):
+            continue
+        rows.append(row)
+    if not rows:
+        return ""
+    first = rows[0]
+    first_cell = (first[0] or "").strip().lower() if first else ""
+    if len(rows) > 1 and first_cell in _CSV_HEADER_FIRST_CELL:
+        rows = rows[1:]
+
+    buf = io.StringIO()
+    writer = csv.writer(
+        buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL
+    )
+    for row in rows:
+        front = row[0] if len(row) >= 1 else ""
+        back = row[1] if len(row) >= 2 else ""
+        if not front and not back:
+            continue
+        writer.writerow([front, back])
+    return buf.getvalue()
 
 
 def _summarize_zip_contents(counts: dict) -> str:
@@ -574,7 +675,12 @@ def _extract_zip_flat(
             if ext in (".csv", ".tsv"):
                 decoded = _decode_text_candidate(data)
                 if decoded is not None:
-                    csv_entries.append((basename, decoded))
+                    # Normalise to TSV up front so the downstream parser
+                    # sees the same shape regardless of original delimiter.
+                    # Notion's database CSVs are comma-separated with a
+                    # header row; Anki's TSVs have neither — the helper
+                    # handles both.
+                    csv_entries.append((basename, _csv_text_to_tsv(decoded)))
                 continue
 
             if ext in (".apkg", ".colpkg"):
@@ -868,8 +974,9 @@ class handler(BaseHTTPRequestHandler):
                             "couldn't find a deck inside the zip (saw: "
                             + _summarize_zip_contents(contents)
                             + "). Include either an Anki 'Notes in Plain Text "
-                            "(.txt)' export, a .csv/.tsv with the same shape, or "
-                            "one or more .apkg files alongside the images.",
+                            "(.txt)' export, a .csv/.tsv with the same shape, "
+                            "one or more .apkg files alongside the images, or "
+                            "a Notion .html / .md export with toggle blocks.",
                         )
                     if len(decks) > 1:
                         # Multiple decks inside the zip — render each one
@@ -907,7 +1014,7 @@ class handler(BaseHTTPRequestHandler):
                         return self._send_json_error(
                             400,
                             "unrecognized upload — expected a .txt, .zip, .apkg, "
-                            ".html, or .md (Notion export)",
+                            ".html, .md, or .csv (Notion export)",
                         )
                 media_count = 0
                 media_dir = Path("/nonexistent-media")
@@ -927,6 +1034,16 @@ class handler(BaseHTTPRequestHandler):
                 elif ext in (".html", ".htm"):
                     source_kind = "notion-html"
                     sides = ats.read_cards_from_notion_html(text, media_dir)
+                elif ext in (".csv", ".tsv"):
+                    # Notion's "Export as Markdown & CSV" produces a
+                    # comma-separated database table; Anki's TSV is tab-
+                    # separated. Auto-detect the delimiter and drop a
+                    # header row if it looks like one, then reuse the TSV
+                    # parser for the front/back split.
+                    source_kind = "csv"
+                    sides = ats.read_cards_from_text(
+                        _csv_text_to_tsv(text), media_dir
+                    )
                 elif ext == ".txt":
                     sides = ats.read_cards_from_text(text, media_dir)
                 elif _looks_like_notion_html(raw):
