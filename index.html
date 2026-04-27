@@ -378,34 +378,49 @@
     .file-list.visible { display: flex; }
     .file-row {
       display: grid;
-      /* Columns: name+meta · state · format-pick · remove/cancel.
-       * The second column (state) must be able to shrink and wrap, so
-       * long error strings don't crush the file name + meta. The third
-       * column (format-pick) is `auto` and lives in its own track so the
-       * select keeps a comfortable hit-target without stealing width
-       * from the state column. */
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto auto;
+      /* Two-row layout per file:
+       *   ┌─────────────────────────────────────────┬────────┐
+       *   │ name + meta              · state        │ remove │
+       *   ├─────────────────────────────────────────┴────────┤
+       *   │ format-pick (stretches across full width)        │
+       *   └──────────────────────────────────────────────────┘
+       * Putting the chip group on its own line beneath the file info
+       * gives every chip room to breathe and keeps the state column
+       * free to wrap long error messages without crushing anything.
+       * Stretched to the full row width so the chips fill the space
+       * evenly — the row reads as one calm block instead of three
+       * different-shaped controls jostling on a single line. */
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+      grid-template-areas:
+        "info state action"
+        "fmt  fmt   fmt";
       align-items: start;
-      gap: 18px 14px;
+      gap: 14px 14px;
       padding: 16px 20px;
       border-top: 1px solid var(--color-border-divider);
       font-size: 14px;
     }
+    .file-row .info { grid-area: info; }
+    .file-row .state { grid-area: state; justify-self: end; }
+    .file-row > button.remove,
+    .file-row > button.cancel { grid-area: action; }
+    .file-row .fmt-pick {
+      grid-area: fmt;
+      justify-self: stretch;
+    }
+    .file-row .fmt-pick button { flex: 1 1 0; }
     @media (max-width: 560px) {
-      /* On narrow screens, drop the format-pick to its own row beneath
-       * name+meta so it doesn't crowd the cancel/remove button. */
+      /* On phones, drop the state under the name+meta block too so the
+       * top line stays uncluttered — just filename and the remove
+       * button. The chip group continues to span the full width below. */
       .file-row {
         grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas:
-          "info action"
+          "info  action"
           "state state"
-          "fmt fmt";
+          "fmt   fmt";
       }
-      .file-row .info { grid-area: info; }
-      .file-row .state { grid-area: state; }
-      .file-row select.fmt-pick { grid-area: fmt; justify-self: stretch; }
-      .file-row > button.remove,
-      .file-row > button.cancel { grid-area: action; }
+      .file-row .state { justify-self: start; }
     }
     .file-row:first-child { border-top: 0; }
     .file-row .info { min-width: 0; }
@@ -500,51 +515,72 @@
     }
     .file-list .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ----- Per-row output format dropdown -----
-     * Each uploaded file gets its own native <select> so a mixed batch
-     * (Notion + Anki) can produce different output formats per row.
-     * The select wears the same outline-button recipe as the remove/cancel
-     * buttons so the row reads as a single typographic unit. */
-    .file-row select.fmt-pick {
-      background: transparent;
+    /* ----- Per-row output format selector (segmented buttons) -----
+     * Each uploaded file gets its own visible chip group so a mixed batch
+     * (Notion + Anki) can produce different output formats per row, and
+     * every choice is one tap away — no menu to open, no "what does this
+     * select?" friction. The group reuses the original .fmt tile recipe
+     * (hairline outline around the group, vertical dividers between
+     * chips, a top-hairline + tinted-bg highlight on the active chip) so
+     * the per-row selector reads as the same control language as the
+     * old global format picker, just compacted to fit a list row. */
+    .file-row .fmt-pick {
+      display: inline-flex;
+      align-items: stretch;
+      align-self: center;
       border: 1px solid var(--color-border);
+      max-width: 100%;
+      transition: border-color 120ms linear;
+    }
+    .file-row .fmt-pick:hover:not([data-disabled="true"]) {
+      border-color: var(--color-border-hover);
+    }
+    .file-row .fmt-pick button {
+      position: relative;
+      background: transparent;
+      border: 0;
+      border-right: 1px solid var(--color-border);
       color: var(--color-fg-soft);
-      padding: 7px 12px;
-      padding-right: 26px;
+      /* Tight horizontal padding lets all five chips fit on the same
+       * row as the filename at the page's 680 px content width. The
+       * uppercase letterspacing already supplies optical breathing
+       * room, so we don't need additional padding to feel readable. */
+      padding: 7px 9px;
+      font-family: inherit;
       font-size: 10.5px;
       letter-spacing: 0.16em;
       text-transform: uppercase;
-      font-family: inherit;
       cursor: pointer;
-      transition: border-color 120ms linear, color 120ms linear;
-      align-self: center;
-      /* Strip the platform-default chrome and draw our own caret so the
-       * control matches the page's flat outline language across browsers. */
-      appearance: none;
-      -webkit-appearance: none;
-      -moz-appearance: none;
-      background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-                        linear-gradient(135deg, currentColor 50%, transparent 50%);
-      background-position:
-        calc(100% - 14px) calc(50% - 1px),
-        calc(100% - 9px) calc(50% - 1px);
-      background-size: 5px 5px, 5px 5px;
-      background-repeat: no-repeat;
-      max-width: 100%;
+      white-space: nowrap;
+      transition: background-color 120ms linear, color 120ms linear, border-color 120ms linear;
     }
-    .file-row select.fmt-pick:hover:not(:disabled) {
-      border-color: var(--color-border-hover);
+    .file-row .fmt-pick button:last-child { border-right: 0; }
+    .file-row .fmt-pick button:hover:not(:disabled):not([aria-pressed="true"]) {
+      background: color-mix(in srgb, var(--color-fg) 3%, transparent);
       color: var(--color-fg);
     }
-    .file-row select.fmt-pick:focus-visible {
+    .file-row .fmt-pick button[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+      color: var(--color-fg);
+    }
+    .file-row .fmt-pick button[aria-pressed="true"]::before {
+      /* Same top-hairline highlight the old global tile selector used
+       * on the active option — keeps the visual cue consistent. */
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -1px;
+      height: 1px;
+      background: var(--color-fg);
+    }
+    .file-row .fmt-pick button:focus-visible {
       outline: 2px solid var(--color-fg-muted);
       outline-offset: 2px;
+      z-index: 1;
     }
-    .file-row select.fmt-pick:disabled { opacity: 0.45; cursor: not-allowed; }
-    .file-row select.fmt-pick option {
-      background: var(--color-bg-page);
-      color: var(--color-fg);
-    }
+    .file-row .fmt-pick button:disabled { cursor: not-allowed; }
+    .file-row .fmt-pick[data-disabled="true"] { opacity: 0.45; }
 
     /* ----- Submit button (outline recipe) ----- */
     button.primary {
@@ -929,12 +965,22 @@
   // txt+media zip or a Notion export zip). We offer all five outputs in
   // that case and let the server resolve it; either way the conversion
   // succeeds.
+  // Long-form labels used in tooltips / aria-labels for screen readers.
+  // The visible chip text uses ``FORMAT_LABELS_SHORT`` below — short enough
+  // that 4–5 chips fit on one row without wrapping mid-group.
   const FORMAT_LABELS = {
     "pdf":      "PDF",
     "pptx":     "PowerPoint",
     "png":      "PNG",
     "apkg":     "Anki .apkg",
     "anki-txt": "Anki .txt + media",
+  };
+  const FORMAT_LABELS_SHORT = {
+    "pdf":      "PDF",
+    "pptx":     "PPTX",
+    "png":      "PNG",
+    "apkg":     ".APKG",
+    "anki-txt": ".TXT",
   };
   const FORMATS_BY_KIND = {
     "anki-apkg":  ["pdf", "pptx", "png", "anki-txt"],
@@ -1218,24 +1264,36 @@
         action.addEventListener("click", () => removeEntry(e.id));
       }
 
-      // Per-row format dropdown. Allowed options are filtered by the file's
-      // detected kind so we never offer a no-op (e.g. an .apkg upload to
-      // .apkg output). Disabled while a batch is running so the user can't
-      // change a row's target format mid-conversion.
+      // Per-row format selector — a segmented button group instead of a
+      // dropdown so every option is visible and one click away. Allowed
+      // options are filtered by the file's detected kind so we never
+      // offer a no-op (e.g. an .apkg upload to .apkg output). Disabled
+      // while a batch is running so the user can't change a row's target
+      // format mid-conversion.
       const allowed = FORMATS_BY_KIND[e.kind] || FORMATS_BY_KIND.unknown;
       if (!allowed.includes(e.format)) e.format = defaultFormatFor(e.kind);
-      const fmtPick = document.createElement("select");
+      const fmtPick = document.createElement("div");
       fmtPick.className = "fmt-pick";
+      fmtPick.setAttribute("role", "radiogroup");
       fmtPick.setAttribute("aria-label", "Output format for " + e.file.name);
-      fmtPick.disabled = converting;
+      if (converting) fmtPick.dataset.disabled = "true";
       for (const fmt of allowed) {
-        const opt = document.createElement("option");
-        opt.value = fmt;
-        opt.textContent = FORMAT_LABELS[fmt] || fmt;
-        if (fmt === e.format) opt.selected = true;
-        fmtPick.appendChild(opt);
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.setAttribute("role", "radio");
+        chip.setAttribute("aria-pressed", fmt === e.format ? "true" : "false");
+        chip.setAttribute("aria-checked", fmt === e.format ? "true" : "false");
+        chip.title = FORMAT_LABELS[fmt] || fmt;
+        chip.textContent = FORMAT_LABELS_SHORT[fmt] || (FORMAT_LABELS[fmt] || fmt);
+        chip.disabled = converting;
+        chip.addEventListener("click", () => {
+          if (converting) return;
+          if (e.format === fmt) return;
+          e.format = fmt;
+          renderList();
+        });
+        fmtPick.appendChild(chip);
       }
-      fmtPick.addEventListener("change", () => { e.format = fmtPick.value; });
 
       row.appendChild(info);
       row.appendChild(state);
