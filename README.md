@@ -1,12 +1,14 @@
-# Anki → Slides
+# Anki · Notion → Anything
 
-Convert any Anki export into a clean 16:9 slide deck — **PDF**, **PowerPoint (.pptx)**, or **PNG** (bundled as a `.zip`).
+Convert Anki exports **or** Notion toggle pages into a clean 16:9 slide deck (**PDF**, **PowerPoint .pptx**, or **PNG** zip), or back into an **Anki deck** (`.apkg` or `.txt + media .zip`).
 
 Front and back of each card become separate slides, in order (`front1, back1, front2, back2, …`), with shrink-to-fit text layout. Basic HTML is stripped, Anki's `<hr id="answer">` separator is respected, `[sound:…]` tags are dropped, and `{{c1::…}}` cloze deletions are unwrapped to their answer.
 
+For Notion exports, every `<details><summary>front</summary>back</details>` toggle becomes one card. Nested toggles each become their own card. Non-toggle Notion content (regular paragraphs, tables, callouts, etc.) is intentionally ignored.
+
 There are two ways to use it:
 
-- **Web app** (this repo, deployed on Vercel) — drop any number of supported Anki exports at once, pick a format, and each is converted and downloaded individually. Nothing is stored on the server.
+- **Web app** (this repo, deployed on Vercel) — drop any number of supported Anki and/or Notion exports at once, pick an output format, and each file is auto-classified and converted individually. Nothing is stored on the server.
 - **CLI** (`anki_to_slides.py`) — runs locally from `.txt` + local media folder.
 
 ## Web app
@@ -29,13 +31,39 @@ Uploads are capped at 100 MB per file. Files ≤ 4 MB are POSTed directly to `/a
 | Anki Collection Package (.colpkg) | No | Full-profile backup — routinely multiple GB and always carries your whole media library. Export the deck you want as `.apkg` instead. |
 | PDF / HTML exporter (add-on) | No | Those are output formats, not inputs. |
 
+### Which Notion export to use
+
+In Notion: **·· (top-right) → Export → Markdown & CSV** or **HTML**. "Include subpages" is fine; "Create folders for subpages" works either way (we flatten by basename).
+
+| Notion export option | Supported? | Notes |
+| --- | --- | --- |
+| **Markdown & CSV (.zip)** | Yes — recommended | Each `.md` page is parsed; images alongside the `.md` are bundled. |
+| **HTML (.zip)** | Yes | Same toggle parsing as Markdown; images bundled. |
+| Single page exported as `.html` | Yes | Drop the file directly. No images unless they're absolute URLs (which we won't fetch). |
+| Single page exported as `.md` | Yes | Same as `.html`. Inline `![alt](path)` images are preserved if you also drop a `.zip`. |
+| PDF | No | We only parse toggle structure, which the PDF format hides. |
+
+Only `<details>`-style toggle blocks become cards. Everything else on the page (regular paragraphs, headings, callouts, databases, etc.) is ignored. Toggle summary → card front, toggle contents → card back.
+
 ### Format quick reference
 
 | Input | Text | Images | Single file | Notes |
 | --- | :---: | :---: | :---: | --- |
-| `.apkg` | ✓ | ✓ | ✓ | Easiest path. |
-| `.zip` (.txt + media) | ✓ | ✓ | ✓ | Use when you only have a `.txt`. |
-| `.txt` | ✓ | — | ✓ | Text-only deck. |
+| Anki `.apkg` | ✓ | ✓ | ✓ | Easiest Anki path. |
+| Anki `.zip` (.txt + media) | ✓ | ✓ | ✓ | Use when you only have a `.txt`. |
+| Anki `.txt` | ✓ | — | ✓ | Text-only deck. |
+| Notion `.html` / `.md` | ✓ | — | ✓ | Single-page export. |
+| Notion `.zip` (+ images) | ✓ | ✓ | ✓ | Markdown & CSV or HTML export. |
+
+### Output formats
+
+| Output | What you get |
+| --- | --- |
+| PDF | One PDF file, one slide per card side. |
+| PowerPoint | Editable `.pptx`. |
+| PNG | A `.zip` of one PNG per side. |
+| Anki `.apkg` | Anki deck — drop into Anki to import. Images bundled. |
+| Anki `.txt + media` | A `.zip` containing a tab-separated `.txt` and any images, ready to re-import or feed back into this tool. |
 
 ### Using a `.txt` export with images
 
@@ -114,11 +142,13 @@ python anki_to_slides.py --media /path/to/collection.media
 
 Output layout:
 
-| format | result                               |
-| ------ | ------------------------------------ |
-| pdf    | `export/<stem>.pdf`                  |
-| pptx   | `export/<stem>/<stem>.pptx`          |
-| png    | `export/<stem>/slide_NNN.png`        |
+| format    | result                               |
+| --------- | ------------------------------------ |
+| pdf       | `export/<stem>.pdf`                  |
+| pptx      | `export/<stem>/<stem>.pptx`          |
+| png       | `export/<stem>/slide_NNN.png`        |
+| apkg      | `export/<stem>.apkg`                 |
+| anki-txt  | `export/<stem>.zip`                  |
 
 ## Project structure
 
@@ -131,7 +161,7 @@ Output layout:
 ├── dev_server.py           # local server that reuses the Vercel handler
 ├── index.html              # web frontend
 ├── package.json            # @vercel/blob dependency for blob-upload.js
-├── requirements.txt        # Python deps (reportlab, python-pptx, Pillow, zstandard)
+├── requirements.txt        # Python deps (reportlab, python-pptx, Pillow, zstandard, genanki)
 ├── vercel.json             # function timeout
 └── .python-version         # Python 3.12
 ```
