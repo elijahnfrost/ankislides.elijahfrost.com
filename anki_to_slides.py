@@ -35,8 +35,10 @@ import re
 import sys
 import zipfile
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import unquote
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -79,7 +81,7 @@ DEFAULT_ANKI_MEDIA = (
     / "collection.media"
 )
 
-SUPPORTED_FORMATS = ("pdf", "pptx", "png")
+SUPPORTED_FORMATS = ("pdf", "pptx", "png", "apkg", "anki-txt")
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +170,237 @@ def read_cards(path: Path, media_dir: Path) -> List[CardSide]:
     """Read an Anki TSV export file and return sides in order front1, back1, ..."""
     with open(path, "r", encoding="utf-8", newline="") as fh:
         return read_cards_from_text(fh.read(), media_dir)
+
+
+# ---------------------------------------------------------------------------
+# Notion parsing
+#
+# Notion exports collapsible "toggle" blocks as ``<details><summary>...</summary>
+# ...children...</details>`` in both its HTML and its Markdown export. The
+# Markdown export embeds the same HTML inline, so the two share one parser:
+# find every ``<details>`` element, take its first ``<summary>`` child as the
+# card front, take everything else inside as the card back. Per the user's
+# spec we treat each toggle (at any depth) as its own card; the parent's
+# back HTML has any nested ``<details>...</details>`` removed before
+# rendering so its inner toggles don't get duplicated as back text.
+#
+# We only emit cards from toggle blocks. Non-toggle Notion content (plain
+# headings, paragraphs, tables, callouts, etc.) is intentionally ignored —
+# users who want to see that content should keep using Notion.
+# ---------------------------------------------------------------------------
+
+
+class _ToggleCollector(HTMLParser):
+    """Walk an HTML document and collect every ``<details>`` element's raw HTML.
+
+    For each top-level-or-nested ``<details>`` we record:
+      - ``summary_html``: the inner HTML of its first ``<summary>`` child
+      - ``body_html``: the rest of the children's inner HTML, with any nested
+        ``<details>...</details>`` stripped (those become their own cards via
+        a separate pass over the same text).
+
+    We work with raw HTML strings (rather than building a DOM) so the
+    downstream ``parse_side`` cleanup — which already understands ``<img>``,
+    ``<br>``, cloze, sound tags — applies unchanged.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self._details_stack: List[dict] = []
+        self.toggles: List[Tuple[str, str]] = []  # (summary_html, body_html)
+
+    def _emit_raw(self, raw: str) -> None:
+        if not self._details_stack:
+            return
+        frame = self._details_stack[-1]
+        if frame["in_summary"] and frame["summary_depth"] == 0:
+            frame["summary"].append(raw)
+        else:
+            frame["body"].append(raw)
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        raw = self.get_starttag_text() or f"<{tag}>"
+        tag_l = tag.lower()
+        if tag_l == "details":
+            self._details_stack.append({
+                "summary": [],
+                "body": [],
+                "in_summary": False,
+                "summary_depth": 0,
+            })
+            return
+        if not self._details_stack:
+            return
+        frame = self._details_stack[-1]
+        if tag_l == "summary" and not frame["in_summary"]:
+            frame["in_summary"] = True
+            frame["summary_depth"] = 0
+            return
+        if frame["in_summary"]:
+            if tag_l == "summary":
+                frame["summary_depth"] += 1
+            frame["summary"].append(raw)
+        else:
+            frame["body"].append(raw)
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        raw = self.get_starttag_text() or f"<{tag}/>"
+        if tag.lower() == "details":
+            return
+        self._emit_raw(raw)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_l = tag.lower()
+        if tag_l == "details":
+            if not self._details_stack:
+                return
+            frame = self._details_stack.pop()
+            summary_html = "".join(frame["summary"]).strip()
+            body_html = "".join(frame["body"]).strip()
+            self.toggles.append((summary_html, body_html))
+            # Re-emit the closed nested details into the parent's body as a
+            # placeholder marker we can later strip — keeps the parent's
+            # back from accidentally containing the child's contents.
+            if self._details_stack:
+                self._details_stack[-1]["body"].append("")
+            return
+        if not self._details_stack:
+            return
+        frame = self._details_stack[-1]
+        if frame["in_summary"]:
+            if tag_l == "summary":
+                if frame["summary_depth"] == 0:
+                    frame["in_summary"] = False
+                    return
+                frame["summary_depth"] -= 1
+            frame["summary"].append(f"</{tag}>")
+        else:
+            frame["body"].append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        self._emit_raw(data)
+
+    def handle_entityref(self, name: str) -> None:
+        self._emit_raw(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self._emit_raw(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        self._emit_raw(f"<!--{data}-->")
+
+
+# Notion's markdown export embeds raw HTML for toggles, so we don't need a
+# full markdown parser — we only need to (a) turn `![alt](path)` image
+# references into `<img src="path">` so the downstream parser sees them,
+# and (b) leave the rest of the source alone (the HTML walker will simply
+# treat it as text data, which gets stripped by parse_side).
+_MD_IMAGE_RE = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)')
+
+
+def _markdown_images_to_html(md: str) -> str:
+    return _MD_IMAGE_RE.sub(
+        lambda m: f'<img src="{html.escape(m.group(2), quote=True)}" alt="{html.escape(m.group(1), quote=True)}">',
+        md,
+    )
+
+
+def _resolve_image_path(src: str, media_dir: Path) -> Path:
+    """Resolve an ``<img src>`` reference to a local file under ``media_dir``.
+
+    Notion percent-encodes spaces and unicode in image paths and stores
+    images in subfolders like ``Page Title abc123/``. We try the path as
+    written, the percent-decoded path, and the basename of either, all
+    relative to ``media_dir``. The first one that exists wins; otherwise
+    we return ``media_dir / basename`` so the renderer's "image not found"
+    warning surfaces a useful filename.
+    """
+    candidates: List[Path] = []
+    for s in (src, unquote(src)):
+        candidates.append(media_dir / s)
+        candidates.append(media_dir / Path(s).name)
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c
+        except OSError:
+            continue
+    return media_dir / Path(unquote(src)).name
+
+
+def _parse_side_with_resolver(raw: str, media_dir: Path, is_back: bool = False) -> CardSide:
+    """Like ``parse_side`` but resolves image paths against Notion's nested folders.
+
+    The standard ``parse_side`` joins ``media_dir / src`` directly; for Notion
+    exports the ``src`` may be percent-encoded or live in a sibling folder.
+    We capture each ``<img>`` ourselves with the resolver, then hand the
+    text fragments to the same cleanup pipeline.
+    """
+    if raw is None:
+        return CardSide(text="", images=[])
+
+    if is_back:
+        raw = ANKI_ANSWER_SEP_RE.sub("", raw, count=1)
+
+    raw = SOUND_TAG_RE.sub("", raw)
+    raw = CLOZE_RE.sub(r"\1", raw)
+
+    images: List[Path] = []
+
+    def _capture_img(match: re.Match) -> str:
+        src = match.group(1).strip()
+        images.append(_resolve_image_path(src, media_dir))
+        return " "
+
+    text = IMG_TAG_RE.sub(_capture_img, raw)
+    text = BR_RE.sub("\n", text)
+    text = TAG_RE.sub(" ", text)
+    text = html.unescape(text)
+
+    lines = [WS_RUN_RE.sub(" ", ln).strip() for ln in text.splitlines()]
+    text = "\n".join(lines).strip()
+    text = BLANK_LINE_RUN_RE.sub("\n\n", text)
+    return CardSide(text=text, images=images)
+
+
+def read_cards_from_notion_html(html_text: str, media_dir: Path) -> List[CardSide]:
+    """Parse a Notion HTML export string into card sides (front, back, ...)."""
+    if not html_text:
+        return []
+    collector = _ToggleCollector()
+    try:
+        collector.feed(html_text)
+        collector.close()
+    except Exception:
+        # HTMLParser is forgiving but Notion sometimes ships malformed
+        # snippets; surface what we got rather than failing the whole upload.
+        pass
+    sides: List[CardSide] = []
+    for summary_html, body_html in collector.toggles:
+        front = _parse_side_with_resolver(summary_html, media_dir, is_back=False)
+        back = _parse_side_with_resolver(body_html, media_dir, is_back=False)
+        if not front.text and not front.images and not back.text and not back.images:
+            continue
+        sides.append(front)
+        sides.append(back)
+    return sides
+
+
+def read_cards_from_notion_markdown(md_text: str, media_dir: Path) -> List[CardSide]:
+    """Parse a Notion Markdown export string into card sides.
+
+    Notion's markdown export embeds toggles as raw ``<details>`` HTML, so we
+    just need to translate inline image syntax to ``<img>`` and reuse the
+    HTML walker.
+    """
+    if not md_text:
+        return []
+    return read_cards_from_notion_html(_markdown_images_to_html(md_text), media_dir)
+
+
+def looks_like_notion_html(text: str) -> bool:
+    """Heuristic: does this text contain at least one ``<details>`` toggle?"""
+    return bool(re.search(r"<details\b", text, re.IGNORECASE))
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +876,183 @@ def render_png_zip_bytes(sides: List[CardSide], stem: str = "slides") -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Anki output: pair the flat sides list back into (front, back) cards.
+# ---------------------------------------------------------------------------
+def sides_to_cards(sides: List[CardSide]) -> List[Tuple[CardSide, CardSide]]:
+    """Group ``[front1, back1, front2, back2, …]`` into ``[(front1, back1), …]``.
+
+    Stray trailing entries (an odd-length list) are paired with an empty
+    side so nothing is silently dropped.
+    """
+    cards: List[Tuple[CardSide, CardSide]] = []
+    for i in range(0, len(sides), 2):
+        front = sides[i]
+        back = sides[i + 1] if i + 1 < len(sides) else CardSide(text="", images=[])
+        cards.append((front, back))
+    return cards
+
+
+def _side_to_anki_html(side: CardSide) -> str:
+    """Render a CardSide as Anki-friendly HTML (text + ``<img>`` references).
+
+    Images are referenced by basename so Anki resolves them against the
+    deck's ``collection.media``. The text portion preserves line breaks via
+    ``<br>`` tags (Anki strips raw newlines on display).
+    """
+    text_html = html.escape(side.text or "").replace("\n", "<br>")
+    img_html = "".join(
+        f'<img src="{html.escape(p.name, quote=True)}">' for p in side.images
+    )
+    if text_html and img_html:
+        return f"{img_html}<br>{text_html}"
+    return img_html or text_html
+
+
+_ANKI_TXT_TAG_RE = re.compile(r"\t|\r|\n")
+
+
+def _side_to_anki_txt_field(side: CardSide) -> str:
+    """Render a CardSide as a single Anki TSV field with HTML preserved."""
+    fragments: List[str] = []
+    for p in side.images:
+        fragments.append(f'<img src="{html.escape(p.name, quote=True)}">')
+    if side.text:
+        text_html = html.escape(side.text).replace("\n", "<br>")
+        fragments.append(text_html)
+    field = "<br>".join(f for f in fragments if f)
+    return _ANKI_TXT_TAG_RE.sub(" ", field)
+
+
+def _stable_anki_id(seed: str) -> int:
+    """Derive a stable 32-bit-ish integer id from a string seed.
+
+    Anki note/model/deck ids must be unique 64-bit integers. Re-deriving
+    the same id from the same input lets a user re-export a deck and have
+    Anki recognise it as the same deck on import (otherwise it'd duplicate).
+    """
+    import hashlib
+    h = hashlib.sha256(seed.encode("utf-8")).digest()
+    return int.from_bytes(h[:6], "big") | 0x100000000  # ensure > 32 bits
+
+
+def render_apkg_bytes(sides: List[CardSide], deck_name: str = "Deck") -> bytes:
+    """Build an Anki ``.apkg`` from ``sides`` and return the raw bytes.
+
+    Uses the ``genanki`` library. Each pair of sides becomes one Basic card
+    (front + back); referenced images are added to the package's media
+    list so they ship inside the bundle.
+    """
+    try:
+        import genanki  # lazy: only needed for this output format
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "the `genanki` package is required to build .apkg files. "
+            "Install it with `pip install genanki`."
+        ) from exc
+    import tempfile
+
+    deck_name = (deck_name or "Deck").strip() or "Deck"
+    model_id = _stable_anki_id("anki-to-slides::model::v1")
+    deck_id = _stable_anki_id(f"anki-to-slides::deck::{deck_name}")
+
+    model = genanki.Model(
+        model_id,
+        "Anki to Slides Basic",
+        fields=[{"name": "Front"}, {"name": "Back"}],
+        templates=[{
+            "name": "Card 1",
+            "qfmt": "{{Front}}",
+            "afmt": '{{FrontSide}}<hr id="answer">{{Back}}',
+        }],
+        css=(
+            ".card { font-family: -apple-system, BlinkMacSystemFont, "
+            "'Segoe UI', Roboto, sans-serif; font-size: 20px; "
+            "text-align: center; color: #111; background: #fff; } "
+            ".card img { max-width: 100%; height: auto; }"
+        ),
+    )
+
+    deck = genanki.Deck(deck_id, deck_name)
+    media_paths: List[str] = []
+    seen_media: set = set()
+
+    for front, back in sides_to_cards(sides):
+        for side in (front, back):
+            for p in side.images:
+                key = p.name
+                if key in seen_media:
+                    continue
+                try:
+                    if p.is_file():
+                        media_paths.append(str(p))
+                        seen_media.add(key)
+                except OSError:
+                    continue
+
+        front_html = _side_to_anki_html(front)
+        back_html = _side_to_anki_html(back)
+        if not front_html and not back_html:
+            continue
+        deck.add_note(genanki.Note(model=model, fields=[front_html, back_html]))
+
+    package = genanki.Package(deck)
+    package.media_files = media_paths
+
+    with tempfile.NamedTemporaryFile(suffix=".apkg", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        package.write_to_file(tmp_path)
+        with open(tmp_path, "rb") as fh:
+            return fh.read()
+    finally:
+        try:
+            Path(tmp_path).unlink()
+        except OSError:
+            pass
+
+
+def render_anki_txt_zip_bytes(sides: List[CardSide], stem: str = "deck") -> bytes:
+    """Build a ``.zip`` containing an Anki Notes-in-Plain-Text export plus media.
+
+    The zip layout mirrors what Anki itself produces when you tick "Include
+    HTML and media references" — a tab-separated ``<stem>.txt`` plus the
+    referenced images at the zip root — so the same archive can be fed
+    back into this tool (or imported into Anki via "Import → Notes in
+    Plain Text" after extracting and pointing media at the folder).
+    """
+    safe_stem = stem or "deck"
+    buf = io.BytesIO()
+    seen_media: set = set()
+
+    txt_buf = io.StringIO()
+    writer = csv.writer(
+        txt_buf, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL
+    )
+    for front, back in sides_to_cards(sides):
+        front_field = _side_to_anki_txt_field(front)
+        back_field = _side_to_anki_txt_field(back)
+        if not front_field and not back_field:
+            continue
+        writer.writerow([front_field, back_field])
+
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{safe_stem}.txt", txt_buf.getvalue())
+        for side in sides:
+            for p in side.images:
+                if p.name in seen_media:
+                    continue
+                try:
+                    if not p.is_file():
+                        continue
+                    with open(p, "rb") as fh:
+                        zf.writestr(p.name, fh.read())
+                    seen_media.add(p.name)
+                except OSError:
+                    continue
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # Convenience entry point (handy for the future web backend too)
 # ---------------------------------------------------------------------------
 def convert(
@@ -670,8 +1080,18 @@ def convert(
         final = render_pdf(sides, out_path)
     elif fmt == "pptx":
         final = render_pptx(sides, out_path)
-    else:
+    elif fmt == "png":
         final = render_png(sides, out_path)
+    elif fmt == "apkg":
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(render_apkg_bytes(sides, deck_name=out_path.stem))
+        final = out_path
+    elif fmt == "anki-txt":
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(render_anki_txt_zip_bytes(sides, stem=out_path.stem))
+        final = out_path
+    else:  # pragma: no cover — guarded above
+        raise ValueError(f"unsupported format: {fmt}")
 
     return final, len(sides)
 
@@ -702,6 +1122,10 @@ def _default_output_path(stem: str, fmt: str) -> Path:
         return DEFAULT_EXPORT_DIR / stem / f"{stem}.pptx"
     if fmt == "png":
         return DEFAULT_EXPORT_DIR / stem
+    if fmt == "apkg":
+        return DEFAULT_EXPORT_DIR / f"{stem}.apkg"
+    if fmt == "anki-txt":
+        return DEFAULT_EXPORT_DIR / f"{stem}.zip"
     raise ValueError(f"unsupported format: {fmt}")
 
 
