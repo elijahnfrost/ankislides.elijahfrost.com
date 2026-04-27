@@ -8,7 +8,7 @@ For Notion exports, every `<details><summary>front</summary>back</details>` togg
 
 There are two ways to use it:
 
-- **Web app** (this repo, deployed on Vercel) — drop any number of supported Anki and/or Notion exports at once, pick an output format, and each file is auto-classified and converted individually. Nothing is stored on the server.
+- **Web app** (this repo, deployed on Vercel) — drop any number of supported Anki and/or Notion exports at once. Each file gets its own output-format dropdown, defaulting to PDF and pre-filtered to the formats that actually make sense for that file (an Anki `.apkg` upload doesn't list `.apkg` as an output, etc.). Mix and match: turn one file into a PDF, another into PNGs, another into an Anki deck, all in one submit. Nothing is stored on the server.
 - **CLI** (`anki_to_slides.py`) — runs locally from `.txt` + local media folder.
 
 ## Web app

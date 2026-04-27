@@ -378,14 +378,34 @@
     .file-list.visible { display: flex; }
     .file-row {
       display: grid;
-      /* Second column must be able to shrink and wrap; `auto` + nowrap made
-         long error strings steal width and crush the file name + meta. */
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+      /* Columns: name+meta · state · format-pick · remove/cancel.
+       * The second column (state) must be able to shrink and wrap, so
+       * long error strings don't crush the file name + meta. The third
+       * column (format-pick) is `auto` and lives in its own track so the
+       * select keeps a comfortable hit-target without stealing width
+       * from the state column. */
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto auto;
       align-items: start;
-      gap: 18px 16px;
+      gap: 18px 14px;
       padding: 16px 20px;
       border-top: 1px solid var(--color-border-divider);
       font-size: 14px;
+    }
+    @media (max-width: 560px) {
+      /* On narrow screens, drop the format-pick to its own row beneath
+       * name+meta so it doesn't crowd the cancel/remove button. */
+      .file-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "info action"
+          "state state"
+          "fmt fmt";
+      }
+      .file-row .info { grid-area: info; }
+      .file-row .state { grid-area: state; }
+      .file-row select.fmt-pick { grid-area: fmt; justify-self: stretch; }
+      .file-row > button.remove,
+      .file-row > button.cancel { grid-area: action; }
     }
     .file-row:first-child { border-top: 0; }
     .file-row .info { min-width: 0; }
@@ -480,73 +500,51 @@
     }
     .file-list .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ----- Format selector ----- */
-    .formats-wrap { margin-top: 56px; }
-    .formats {
-      display: grid;
-      /* Five output formats now (PDF / PPTX / PNG / .apkg / .txt+media).
-       * On wide viewports they sit on one row; on phones we wrap to 2-up
-       * so each tile keeps a comfortable target size. The bottom row of
-       * a 2-col layout would otherwise lose its right border because the
-       * outer container clips it — we restore it via .fmt:nth-child(odd)
-       * below in the @media block. */
-      grid-template-columns: repeat(5, 1fr);
-      gap: 0;
-      border: 1px solid var(--color-border-section);
-      border-right: 0;
-    }
-    @media (max-width: 720px) {
-      .formats { grid-template-columns: repeat(2, 1fr); }
-    }
-    .fmt {
-      border-right: 1px solid var(--color-border-section);
-      padding: 24px 20px;
-      text-align: left;
-      cursor: pointer;
+    /* ----- Per-row output format dropdown -----
+     * Each uploaded file gets its own native <select> so a mixed batch
+     * (Notion + Anki) can produce different output formats per row.
+     * The select wears the same outline-button recipe as the remove/cancel
+     * buttons so the row reads as a single typographic unit. */
+    .file-row select.fmt-pick {
       background: transparent;
-      transition: background-color 120ms linear, border-color 120ms linear;
-      position: relative;
-    }
-    @media (max-width: 720px) {
-      /* Wrapping leaves the second-row tiles with no top border;
-       * the existing recipe relied on the outer container border. */
-      .fmt { border-top: 1px solid var(--color-border-section); }
-      .fmt:nth-child(-n+2) { border-top: 0; }
-    }
-    .fmt:hover { background: color-mix(in srgb, var(--color-fg) 2%, transparent); }
-    .fmt.active {
-      background: color-mix(in srgb, var(--color-fg) 4%, transparent);
-    }
-    .fmt.active::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: -1px;
-      height: 1px;
-      background: var(--color-fg);
-    }
-    .fmt .fmt-label {
+      border: 1px solid var(--color-border);
+      color: var(--color-fg-soft);
+      padding: 7px 12px;
+      padding-right: 26px;
       font-size: 10.5px;
-      letter-spacing: 0.18em;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: var(--color-fg-dim);
-      margin-bottom: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 120ms linear, color 120ms linear;
+      align-self: center;
+      /* Strip the platform-default chrome and draw our own caret so the
+       * control matches the page's flat outline language across browsers. */
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                        linear-gradient(135deg, currentColor 50%, transparent 50%);
+      background-position:
+        calc(100% - 14px) calc(50% - 1px),
+        calc(100% - 9px) calc(50% - 1px);
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      max-width: 100%;
     }
-    .fmt .fmt-title {
-      font-family: var(--font-cormorant);
-      font-weight: 400;
-      font-size: 24px;
+    .file-row select.fmt-pick:hover:not(:disabled) {
+      border-color: var(--color-border-hover);
       color: var(--color-fg);
-      line-height: 1.1;
     }
-    .fmt.active .fmt-title { color: var(--color-fg-bright); }
-    .fmt .fmt-sub {
-      font-size: 12px;
-      color: var(--color-fg-body);
-      margin-top: 6px;
+    .file-row select.fmt-pick:focus-visible {
+      outline: 2px solid var(--color-fg-muted);
+      outline-offset: 2px;
     }
-    .fmt input { display: none; }
+    .file-row select.fmt-pick:disabled { opacity: 0.45; cursor: not-allowed; }
+    .file-row select.fmt-pick option {
+      background: var(--color-bg-page);
+      color: var(--color-fg);
+    }
 
     /* ----- Submit button (outline recipe) ----- */
     button.primary {
@@ -759,7 +757,7 @@
         Anki<span class="dot">·</span>Notion<span class="arrow">→</span><em>Anything</em>
       </h1>
       <p class="lede">
-        Drop Anki exports or Notion toggle pages. Get back PDF, PowerPoint, PNG, or an Anki deck. Front and back become separate slides, in order. Nothing is stored.
+        Drop Anki exports or Notion toggle pages — pick the output for each file (PDF, PowerPoint, PNG, or an Anki deck). Front and back become separate slides, in order. Nothing is stored.
       </p>
     </section>
 
@@ -769,7 +767,7 @@
 
       <div class="step fade-in-up delay-2">
         <div class="num">01</div>
-        <div class="label">Upload your export</div>
+        <div class="label">Upload &amp; choose per file</div>
       </div>
 
       <input
@@ -782,51 +780,11 @@
       <label id="drop" class="drop fade-in-up delay-2" for="file-input">
         <div class="title">Click to choose <em>or drag files here</em></div>
         <div class="hint">
-          Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.zip</code> &middot; auto-detected &middot; max 100 MB each &middot; multi-file OK
+          Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.zip</code> &middot; pick an output format per file &middot; max 100 MB each
         </div>
       </label>
 
       <div id="file-list" class="file-list" aria-live="polite"></div>
-
-      <div class="formats-wrap">
-        <div class="step fade-in-up delay-3">
-          <div class="num">02</div>
-          <div class="label">Pick a format</div>
-        </div>
-
-        <div class="formats fade-in-up delay-3" role="radiogroup" aria-label="Output format">
-          <label class="fmt active">
-            <input type="radio" name="format" value="pdf" checked />
-            <div class="fmt-label">Document</div>
-            <div class="fmt-title">PDF</div>
-            <div class="fmt-sub">Single file</div>
-          </label>
-          <label class="fmt">
-            <input type="radio" name="format" value="pptx" />
-            <div class="fmt-label">Editable</div>
-            <div class="fmt-title">PowerPoint</div>
-            <div class="fmt-sub">.pptx</div>
-          </label>
-          <label class="fmt">
-            <input type="radio" name="format" value="png" />
-            <div class="fmt-label">Images</div>
-            <div class="fmt-title">PNG</div>
-            <div class="fmt-sub">.zip of images</div>
-          </label>
-          <label class="fmt">
-            <input type="radio" name="format" value="apkg" />
-            <div class="fmt-label">Anki deck</div>
-            <div class="fmt-title">.apkg</div>
-            <div class="fmt-sub">Images bundled</div>
-          </label>
-          <label class="fmt">
-            <input type="radio" name="format" value="anki-txt" />
-            <div class="fmt-label">Anki text</div>
-            <div class="fmt-title">.txt + media</div>
-            <div class="fmt-sub">.zip</div>
-          </label>
-        </div>
-      </div>
 
       <button type="submit" class="primary" id="submit" disabled>
         <span id="submit-label">Convert &amp; download</span>
@@ -952,11 +910,55 @@
   const submitLabel = document.getElementById("submit-label");
   const status = document.getElementById("status");
   const form = document.getElementById("form");
-  const fmtLabels = document.querySelectorAll(".fmt");
 
   const entries = [];
   let nextId = 1;
   let converting = false;
+
+  // Per-row format selector data.
+  //
+  // Each entry carries its own ``format`` (defaulting to "pdf") so a mixed
+  // batch can produce different outputs per file (e.g. a Notion page as
+  // PDF and an Anki .apkg as PNG) without a global radio group. We classify
+  // the file's kind from its extension and offer only the formats that
+  // make sense for that kind — most importantly, we omit the output that
+  // would just re-emit the same file the user uploaded (an Anki .apkg
+  // doesn't need to be "converted" into another .apkg).
+  //
+  // The .zip kind is genuinely ambiguous client-side (could be an Anki
+  // txt+media zip or a Notion export zip). We offer all five outputs in
+  // that case and let the server resolve it; either way the conversion
+  // succeeds.
+  const FORMAT_LABELS = {
+    "pdf":      "PDF",
+    "pptx":     "PowerPoint",
+    "png":      "PNG",
+    "apkg":     "Anki .apkg",
+    "anki-txt": "Anki .txt + media",
+  };
+  const FORMATS_BY_KIND = {
+    "anki-apkg":  ["pdf", "pptx", "png", "anki-txt"],
+    "anki-txt":   ["pdf", "pptx", "png", "apkg"],
+    "anki-zip":   ["pdf", "pptx", "png", "apkg", "anki-txt"],
+    "notion-html":["pdf", "pptx", "png", "apkg", "anki-txt"],
+    "notion-md":  ["pdf", "pptx", "png", "apkg", "anki-txt"],
+    "unknown":    ["pdf", "pptx", "png", "apkg", "anki-txt"],
+  };
+
+  function classifyKind(file) {
+    const ext = fileExt(file);
+    if (ext === ".apkg") return "anki-apkg";
+    if (ext === ".txt") return "anki-txt";
+    if (ext === ".html" || ext === ".htm") return "notion-html";
+    if (ext === ".md" || ext === ".markdown") return "notion-md";
+    if (ext === ".zip") return "anki-zip"; // covers Notion zips too — server settles it
+    return "unknown";
+  }
+
+  function defaultFormatFor(kind) {
+    const allowed = FORMATS_BY_KIND[kind] || FORMATS_BY_KIND.unknown;
+    return allowed.includes("pdf") ? "pdf" : allowed[0];
+  }
 
   // We route uploads through two paths:
   //
@@ -1078,7 +1080,15 @@
         rejected.push({ file, reason: describeUnsupported(file) });
         continue;
       }
-      entries.push({ id: nextId++, file, state: "pending", message: "" });
+      const kind = classifyKind(file);
+      entries.push({
+        id: nextId++,
+        file,
+        state: "pending",
+        message: "",
+        kind,
+        format: defaultFormatFor(kind),
+      });
       added += 1;
     }
     if (rejected.length > 0) {
@@ -1208,8 +1218,28 @@
         action.addEventListener("click", () => removeEntry(e.id));
       }
 
+      // Per-row format dropdown. Allowed options are filtered by the file's
+      // detected kind so we never offer a no-op (e.g. an .apkg upload to
+      // .apkg output). Disabled while a batch is running so the user can't
+      // change a row's target format mid-conversion.
+      const allowed = FORMATS_BY_KIND[e.kind] || FORMATS_BY_KIND.unknown;
+      if (!allowed.includes(e.format)) e.format = defaultFormatFor(e.kind);
+      const fmtPick = document.createElement("select");
+      fmtPick.className = "fmt-pick";
+      fmtPick.setAttribute("aria-label", "Output format for " + e.file.name);
+      fmtPick.disabled = converting;
+      for (const fmt of allowed) {
+        const opt = document.createElement("option");
+        opt.value = fmt;
+        opt.textContent = FORMAT_LABELS[fmt] || fmt;
+        if (fmt === e.format) opt.selected = true;
+        fmtPick.appendChild(opt);
+      }
+      fmtPick.addEventListener("change", () => { e.format = fmtPick.value; });
+
       row.appendChild(info);
       row.appendChild(state);
+      row.appendChild(fmtPick);
       row.appendChild(action);
       fileList.appendChild(row);
     }
@@ -1251,13 +1281,6 @@
   });
   drop.addEventListener("drop", (e) => {
     addFiles(e.dataTransfer && e.dataTransfer.files);
-  });
-
-  fmtLabels.forEach((lbl) => {
-    lbl.addEventListener("click", () => {
-      fmtLabels.forEach((l) => l.classList.remove("active"));
-      lbl.classList.add("active");
-    });
   });
 
   // ------------------------------------------------------------------
@@ -1577,7 +1600,6 @@
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (converting || entries.length === 0) return;
-    const fmt = document.querySelector('input[name="format"]:checked').value;
 
     for (const entry of entries) {
       entry.state = "pending";
@@ -1606,7 +1628,7 @@
         + entries.length + " — " + entry.file.name + "…"
       );
       try {
-        const summary = await convertOne(entry, fmt);
+        const summary = await convertOne(entry, entry.format);
         entry.state = "done";
         entry.message = summary;
         done += 1;
