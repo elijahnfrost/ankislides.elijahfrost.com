@@ -150,6 +150,7 @@
     .fade-in-up.delay-2 { animation-delay: 40ms; }
     .fade-in-up.delay-3 { animation-delay: 80ms; }
     .fade-in-up.delay-4 { animation-delay: 120ms; }
+    .fade-in-up.delay-5 { animation-delay: 160ms; }
     @media (prefers-reduced-motion: reduce) {
       .fade-in-up { animation: none; opacity: 1; }
     }
@@ -192,11 +193,11 @@
      * Page frame
      *
      * `main` is a thin wrapper. All vertical rhythm lives inside `.screen`
-     * and `.reference`. `.screen` is the first thing you see — it claims a
+     * and the workflow/form stack. `.screen` is the first thing you see — it claims a
      * full viewport height and vertically centers the hero + form so the
      * title and call-to-action land in the middle of the window, not
-     * anchored at the top with 40% whitespace below. The reference block
-     * sits outside the screen so it's only reached by scrolling.
+     * anchored at the top with 40% whitespace below. The info block
+     * sits below the fold so it's only reached by scrolling.
      * -------------------------------------------------------------------- */
     main {
       max-width: 760px;
@@ -223,13 +224,13 @@
 
     /* ----- Hero ----- */
     .hero {
-      padding: 24px 0 64px;
-      margin-bottom: 64px;
+      padding: 24px 0 40px;
+      margin-bottom: 48px;
       position: relative;
       text-align: center;
     }
     @media (min-width: 640px) {
-      .hero { padding: 32px 0 88px; margin-bottom: 88px; }
+      .hero { padding: 28px 0 48px; margin-bottom: 56px; }
     }
 
     .hero .eyebrow {
@@ -305,6 +306,43 @@
     /* ----- Single-column layout ----- */
     .layout { display: block; }
 
+    /* ----- Workflow steps (numbered, no frames) ----- */
+    #form {
+      display: flex;
+      flex-direction: column;
+      gap: 52px;
+    }
+    @media (min-width: 640px) {
+      #form { gap: 72px; }
+    }
+    @media (min-width: 900px) {
+      #form { gap: 88px; }
+    }
+    .workflow-step {
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+    .workflow-step .step {
+      margin-bottom: 14px;
+    }
+    @media (min-width: 640px) {
+      .workflow-step .step { margin-bottom: 16px; }
+    }
+    .workflow-step-hint {
+      margin: 0 0 18px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--color-fg-dim);
+      max-width: 54ch;
+    }
+    @media (min-width: 640px) {
+      .workflow-step-hint { margin-bottom: 20px; font-size: 12.5px; }
+    }
+    .workflow-step:has(.file-row) .workflow-step-hint--queue {
+      display: none;
+    }
+
     /* ----- Section heading (numbered) ----- */
     .step {
       display: flex;
@@ -331,9 +369,9 @@
     /* ----- Drop zone ----- */
     .drop {
       display: block;
-      border: 1px solid var(--color-border-section);
+      border: 1px solid var(--color-border-divider);
       background: transparent;
-      padding: 56px 28px;
+      padding: 48px 24px;
       text-align: center;
       cursor: pointer;
       transition: border-color 120ms linear, background-color 120ms linear;
@@ -370,69 +408,117 @@
 
     /* ----- File list ----- */
     .file-list {
-      display: none;
+      display: flex;
       flex-direction: column;
-      border: 1px solid var(--color-border-section);
-      /* Stand-alone block instead of welded to the drop zone above —
-       * the upload control and the queue are two distinct things. */
-      margin-top: 16px;
+      align-items: stretch;
+      justify-content: flex-start;
+      align-content: flex-start;
+      border: 0;
+      min-height: 0;
+      margin-top: 4px;
     }
-    .file-list.visible { display: flex; }
+    .file-queue-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 28px 16px 12px;
+      gap: 10px;
+    }
+    .file-queue-empty strong {
+      display: block;
+      margin: 0;
+      font-weight: 500;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--color-fg-soft);
+    }
+    .file-queue-empty__hint {
+      display: block;
+      max-width: 52ch;
+      margin: 0;
+      padding: 0;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.6;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--color-fg-body);
+    }
+    /* Isolate queue flex chain from min-height quirks (esp. Safari) */
+    #step-queue {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      min-height: 0;
+    }
+    /* Row top line uses flex-grow/basis:auto — flex: 1 1 0 caused ~hundreds of
+     * px of stray height here in WebKit with nested column flex ancestors. */
     .file-row {
-      display: grid;
-      /* Two-row layout per file:
-       *   ┌─────────────────────────────────────────┬────────┐
-       *   │ name + meta              · state        │ remove │
-       *   ├─────────────────────────────────────────┴────────┤
-       *   │ format-pick (stretches across full width)        │
-       *   └──────────────────────────────────────────────────┘
-       * Putting the chip group on its own line beneath the file info
-       * gives every chip room to breathe and keeps the state column
-       * free to wrap long error messages without crushing anything.
-       * Stretched to the full row width so the chips fill the space
-       * evenly — the row reads as one calm block instead of three
-       * different-shaped controls jostling on a single line. */
-      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
-      grid-template-areas:
-        "info state action"
-        "fmt  fmt   fmt";
-      align-items: start;
-      gap: 14px 14px;
-      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      flex-grow: 0;
+      flex-shrink: 0;
+      align-items: stretch;
+      justify-content: flex-start;
+      min-height: 0;
+      height: fit-content;
+      max-height: none;
+      gap: 8px;
+      padding: 10px 16px 12px;
       border-top: 1px solid var(--color-border-divider);
       font-size: 14px;
     }
-    .file-row .info { grid-area: info; }
-    .file-row .state {
-      grid-area: state;
-      justify-self: end;
-      /* Match the remove/cancel button's vertical centering so the
-       * status line sits on the same horizontal axis as the action,
-       * regardless of how many lines the .info column wraps to. */
-      align-self: center;
+    .file-list > .file-row,
+    .file-list > .file-queue-empty,
+    .file-list > .toolbar {
+      flex: 0 0 auto;
     }
-    .file-row > button.remove,
-    .file-row > button.cancel { grid-area: action; }
-    .file-row .fmt-pick {
-      grid-area: fmt;
-      justify-self: stretch;
+    .file-row__head {
+      display: flex;
+      flex: 0 0 auto;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      column-gap: 12px;
+      row-gap: 8px;
+      min-height: 0;
+      height: fit-content;
+      max-height: none;
+      min-width: 0;
+      width: 100%;
+      box-sizing: border-box;
     }
-    .file-row .fmt-pick button { flex: 1 1 0; }
+    .file-row__head .info {
+      flex-grow: 1;
+      flex-shrink: 1;
+      flex-basis: auto;
+      min-width: 0;
+    }
+    .file-row__head .state {
+      flex: 0 0 auto;
+      min-width: 0;
+    }
+    .file-row__head > button.remove,
+    .file-row__head > button.cancel {
+      flex: 0 0 auto;
+    }
     @media (max-width: 560px) {
-      /* On phones, drop the state under the name+meta block too so the
-       * top line stays uncluttered — just filename and the remove
-       * button. The chip group continues to span the full width below. */
-      .file-row {
-        grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas:
-          "info  action"
-          "state state"
-          "fmt   fmt";
+      .file-row__head {
+        align-items: flex-start;
       }
-      .file-row .state { justify-self: start; }
+      .file-row__head .info { order: 1; }
+      .file-row__head > button.remove,
+      .file-row__head > button.cancel { order: 2; }
+      .file-row__head .state {
+        order: 3;
+        width: 100%;
+      }
     }
-    .file-row:first-child { border-top: 0; }
-    .file-row .info { min-width: 0; }
+    .file-row:first-child { border-top: 1px solid var(--color-border-divider); }
     .file-row .name {
       color: var(--color-fg);
       overflow: hidden;
@@ -445,7 +531,7 @@
       font-size: 11px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      margin-top: 5px;
+      margin-top: 3px;
     }
     .file-row .state {
       font-size: 11px;
@@ -461,16 +547,12 @@
     .file-row[data-state="error"] .state { color: var(--color-error-text); }
     .file-row[data-state="converting"] .state,
     .file-row[data-state="uploading"] .state { color: var(--color-fg); }
-    .file-row > button.remove,
-    .file-row > button.cancel {
-      align-self: center;
-    }
     .file-row button.remove,
     .file-row button.cancel {
       background: transparent;
       border: 1px solid var(--color-border);
       color: var(--color-fg-soft);
-      padding: 7px 13px;
+      padding: 5px 11px;
       font-size: 10.5px;
       letter-spacing: 0.16em;
       text-transform: uppercase;
@@ -494,19 +576,49 @@
       background: var(--color-error-text);
       color: var(--color-bg);
     }
-    /* Footer of the file list — currently just the running file/size
-     * summary. The "clear all" action that used to share this row has
-     * moved out below the convert button. */
+    /* Footer: queue summary (left) + subtle clear-all (right). */
     .file-list .toolbar {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 14px 20px;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px 4px;
       border-top: 1px solid var(--color-border-divider);
       font-size: 11px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--color-fg-dim);
+    }
+    .file-list .toolbar .toolbar-summary {
+      flex: 1;
+      min-width: 0;
+    }
+    .file-list .toolbar .toolbar-clear {
+      flex-shrink: 0;
+    }
+    .file-list .toolbar .toolbar-clear-btn {
+      background: transparent;
+      border: 0;
+      padding: 4px 2px;
+      margin: 0;
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+      cursor: pointer;
+      transition: color 120ms linear;
+    }
+    .file-list .toolbar .toolbar-clear-btn:hover:not(:disabled) {
+      color: var(--color-fg-soft);
+    }
+    .file-list .toolbar .toolbar-clear-btn:focus-visible {
+      outline: 2px solid var(--color-fg-muted);
+      outline-offset: 2px;
+    }
+    .file-list .toolbar .toolbar-clear-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
     }
 
     /* ----- Per-row output format selector (segmented buttons) -----
@@ -519,18 +631,22 @@
      * the per-row selector reads as the same control language as the
      * old global format picker, just compacted to fit a list row. */
     .file-row .fmt-pick {
-      display: inline-flex;
+      flex: 0 0 auto;
+      display: flex;
       align-items: stretch;
-      align-self: center;
+      align-self: stretch;
+      width: 100%;
+      min-width: 0;
       border: 1px solid var(--color-border);
       max-width: 100%;
-      transition: border-color 120ms linear;
-    }
-    .file-row .fmt-pick:hover:not([data-disabled="true"]) {
-      border-color: var(--color-border-hover);
+      box-sizing: border-box;
     }
     .file-row .fmt-pick button {
       position: relative;
+      flex-grow: 1;
+      flex-shrink: 1;
+      flex-basis: auto;
+      min-width: 0;
       background: transparent;
       border: 0;
       border-right: 1px solid var(--color-border);
@@ -539,7 +655,7 @@
        * row as the filename at the page's 680 px content width. The
        * uppercase letterspacing already supplies optical breathing
        * room, so we don't need additional padding to feel readable. */
-      padding: 7px 9px;
+      padding: 5px 8px;
       font-family: inherit;
       font-size: 10.5px;
       letter-spacing: 0.16em;
@@ -578,7 +694,7 @@
 
     /* ----- Submit button (outline recipe) ----- */
     button.primary {
-      margin-top: 48px;
+      margin-top: 0;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -614,7 +730,7 @@
     }
 
     .status {
-      margin-top: 20px;
+      margin-top: 16px;
       font-size: 12px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
@@ -627,63 +743,28 @@
     .status.error { color: var(--color-error-text); }
     .status.success { color: var(--color-success-text); }
 
-    /* ----- Post-actions row -----
-     * Holds destructive/secondary actions that follow the primary
-     * submit — currently just "clear all". Lives below the convert
-     * button (and the status line) so the queue-clearing escape hatch
-     * is one click away without competing with the convert call to
-     * action visually. Stays hidden when the queue is empty. */
-    .post-actions {
-      display: flex;
-      justify-content: center;
-      margin-top: 18px;
+    /* ----- Info (formats + behaviour) — one quiet block below the form -----
+     * Scope margin to section.info only: per-row filenames use .info inside
+     * .file-row__head and must not inherit this top spacing. */
+    section.info {
+      margin-top: clamp(72px, 12vw, 120px);
     }
-    .post-actions button {
-      background: transparent;
-      border: 0;
-      color: var(--color-fg-muted);
-      padding: 8px 14px;
-      font-family: inherit;
-      font-size: 10.5px;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: color 120ms linear;
+    .info-head {
+      margin: 0 0 20px;
+      max-width: 640px;
     }
-    .post-actions button:hover:not(:disabled) { color: var(--color-fg); }
-    .post-actions button:focus-visible {
-      outline: 2px solid var(--color-fg-muted);
-      outline-offset: 2px;
-    }
-    .post-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    /* ----- Reference block (bottom of page) -----
-     * Replaces the old sidebar + two help accordions. Everything lives
-     * here now: the input-format matrix, the "always dropped" list, and
-     * the "preserved" paragraph. Sits below the form on its own, marked
-     * off by a top divider so it reads as a footer-ish info panel, not
-     * another interactive step.
-     * -------------------------------------------------------------- */
-    .reference {
-      margin-top: 112px;
-    }
-    .reference-heading.step {
-      margin-bottom: 28px;
-    }
-    .reference-heading.step h2.label {
+    .info-title {
       margin: 0;
-      padding: 0;
-      border: 0;
       font-family: var(--font-inter);
-      font-size: 11.5px;
-      font-weight: 400;
-      letter-spacing: 0.18em;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.2em;
       text-transform: uppercase;
       color: var(--color-fg-soft);
-      line-height: 1.2;
+      line-height: 1.3;
     }
 
-    .reference table.ref {
+    .info table.ref {
       width: 100%;
       max-width: 640px;
       margin-left: 0;
@@ -695,18 +776,18 @@
     }
     /* App · Format · Text · Images · Single — column widths follow the
      * rowspan App rail + prose-heavy Format column. */
-    .reference table.ref col.col-app { width: 13%; }
-    .reference table.ref col.col-label { width: 37%; }
-    .reference table.ref col.col-check { width: 16.33%; }
-    .reference table.ref th,
-    .reference table.ref td {
+    .info table.ref col.col-app { width: 13%; }
+    .info table.ref col.col-label { width: 37%; }
+    .info table.ref col.col-check { width: 16.33%; }
+    .info table.ref th,
+    .info table.ref td {
       padding: 14px 12px;
       border-bottom: 1px solid var(--color-border-divider);
       text-align: center;
       vertical-align: middle;
       color: var(--color-fg-body);
     }
-    .reference table.ref thead th {
+    .info table.ref thead th {
       padding-top: 14px;
       padding-bottom: 14px;
       padding-left: 12px;
@@ -720,18 +801,18 @@
       letter-spacing: 0.12em;
       text-transform: uppercase;
     }
-    .reference table.ref thead th:first-child {
+    .info table.ref thead th:first-child {
       padding-left: 14px;
       border-right: 1px solid var(--color-border-divider);
     }
-    .reference table.ref tbody.ref-group-anki tr:first-child th.ref-app-cell,
-    .reference table.ref tbody.ref-group-anki tr:first-child td:nth-child(2) {
+    .info table.ref tbody.ref-group-anki tr:first-child th.ref-app-cell,
+    .info table.ref tbody.ref-group-anki tr:first-child td:nth-child(2) {
       padding-top: 14px;
     }
-    .reference table.ref tbody.ref-group-anki tr:not(:first-child) td:first-child.ref-format {
+    .info table.ref tbody.ref-group-anki tr:not(:first-child) td:first-child.ref-format {
       padding-top: 14px;
     }
-    .reference table.ref th.ref-app-cell {
+    .info table.ref th.ref-app-cell {
       padding: 14px 12px;
       vertical-align: middle;
       text-align: center;
@@ -743,18 +824,18 @@
       background: transparent;
     }
     /* Divider between Anki and Notion blocks (not the outer table edge). */
-    .reference table.ref tbody.ref-group-notion tr:first-child th,
-    .reference table.ref tbody.ref-group-notion tr:first-child td {
+    .info table.ref tbody.ref-group-notion tr:first-child th,
+    .info table.ref tbody.ref-group-notion tr:first-child td {
       border-top: 1px solid var(--color-border-section);
       padding-top: 14px;
     }
-    .reference table.ref th:nth-child(2),
-    .reference table.ref td.ref-format {
+    .info table.ref th:nth-child(2),
+    .info table.ref td.ref-format {
       text-align: left;
       color: var(--color-fg);
       padding-right: 12px;
     }
-    .reference table.ref td.ref-format {
+    .info table.ref td.ref-format {
       font-family: var(--font-inter);
       font-size: 13.5px;
       font-weight: 400;
@@ -765,13 +846,13 @@
       white-space: nowrap;
     }
     @media (max-width: 560px) {
-      .reference table.ref td.ref-format {
+      .info table.ref td.ref-format {
         white-space: normal;
       }
     }
     /* Code-shaped extensions stay monospace; prose stays Inter — warmer
      * than all-mono without losing scanability for `.apkg`-style tokens. */
-    .reference table.ref td.ref-format code {
+    .info table.ref td.ref-format code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 13px;
       font-weight: 400;
@@ -780,22 +861,22 @@
       padding: 0;
       border: 0;
     }
-    .reference table.ref th:last-child,
-    .reference table.ref td:last-child {
+    .info table.ref th:last-child,
+    .info table.ref td:last-child {
       padding-right: 14px;
     }
     /* No baseline line flush with the bottom margin of the block — avoids
      * looking like a second “outer” frame; the rest of the grid lines stay. */
-    .reference table.ref tr:last-child td,
-    .reference table.ref tbody:last-child tr:last-child th {
+    .info table.ref tr:last-child td,
+    .info table.ref tbody:last-child tr:last-child th {
       border-bottom: 0;
     }
-    .reference table.ref td .y { color: var(--color-fg); }
-    .reference table.ref td .n { color: var(--color-fg-dim); }
-    .reference table.ref td .x { color: var(--color-fg-dim); }
+    .info table.ref td .y { color: var(--color-fg); }
+    .info table.ref td .n { color: var(--color-fg-dim); }
+    .info table.ref td .x { color: var(--color-fg-dim); }
 
     /* App column — rowspan cell; centered horizontal label only. */
-    .reference table.ref .ref-app-name {
+    .info table.ref .ref-app-name {
       display: inline-block;
       font-family: var(--font-inter);
       font-size: 11px;
@@ -809,46 +890,44 @@
     /* Rows for unsupported inputs read as muted; strike only the format cell.
      * ``code`` inside .ref-format keeps its own `--color-fg` elsewhere — force
      * it dim here so `.colpkg` matches plain ``PDF``. */
-    .reference table.ref tr.unsupported td {
+    .info table.ref tr.unsupported td {
       color: var(--color-fg-dim);
     }
-    .reference table.ref tr.unsupported td.ref-format code {
+    .info table.ref tr.unsupported td.ref-format code {
       color: var(--color-fg-dim);
     }
-    .reference table.ref tr.unsupported td.ref-format {
+    .info table.ref tr.unsupported td.ref-format {
       text-decoration: line-through;
       text-decoration-color: var(--color-fg-dim);
     }
 
-    /* Explainer bullets sit under the matrix under one rule — still part of
-     * step ``02`` (same section as the table); divider is lighter than the
-     * main reference break above so it reads as subsection, not a new step. */
-    .reference .notes {
-      display: flex;
-      flex-direction: column;
-      gap: 36px;
+    /* Prose detail under the matrix — same section, no rules between bits. */
+    .info-details {
       max-width: 640px;
-      margin-top: 72px;
-      margin-left: 0;
-      padding-top: 44px;
-      border-top: 1px solid var(--color-border-divider);
-    }
-    @media (max-width: 560px) {
-      .reference .notes { gap: 28px; }
-    }
-    .reference .note {
+      margin-top: 36px;
       font-size: 13.5px;
       line-height: 1.75;
       color: var(--color-fg-body);
     }
-    .reference .note-label {
-      font-size: 10.5px;
-      letter-spacing: 0.16em;
+    @media (min-width: 640px) {
+      .info-details { margin-top: 40px; }
+    }
+    .info-bit + .info-bit {
+      margin-top: 1.35em;
+    }
+    @media (min-width: 640px) {
+      .info-bit + .info-bit { margin-top: 1.5em; }
+    }
+    .info-bit-title {
+      margin: 0 0 0.45em;
+      font-family: var(--font-inter);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--color-fg-soft);
-      margin-bottom: 14px;
     }
-    .reference .drop-list {
+    .info .drop-list {
       margin: 0;
       padding: 0;
       list-style: none;
@@ -858,11 +937,11 @@
      * the surrounding text. The previous flex layout treated each child
      * element as its own column, which shattered any bullet containing
      * inline ``<code>`` into several stacked text fragments. */
-    .reference .drop-list li {
+    .info .drop-list li {
       position: relative;
-      padding: 5px 0 5px 15px;
+      padding: 4px 0 4px 15px;
     }
-    .reference .drop-list li::before {
+    .info .drop-list li::before {
       content: "";
       position: absolute;
       left: 0;
@@ -872,7 +951,7 @@
       border-radius: 50%;
       background: var(--color-bullet);
     }
-    .reference code {
+    .info code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12.5px;
       color: var(--color-fg);
@@ -926,47 +1005,58 @@
 
       <form id="form" autocomplete="off">
 
-      <div class="step fade-in-up delay-2">
-        <div class="num">01</div>
-        <div class="label">Upload &amp; choose per file</div>
-      </div>
-
-      <input
-        id="file-input"
-        class="sr-only-input"
-        type="file"
-        multiple
-        accept=".txt,.zip,.apkg,.html,.htm,.md,.markdown,.csv,.tsv,text/plain,text/html,text/markdown,text/csv,application/zip,application/octet-stream"
-      />
-      <label id="drop" class="drop fade-in-up delay-2" for="file-input">
-        <div class="title">Click to choose <em>or drag files here</em></div>
-        <div class="hint">
-          Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.csv</code> / <code>.zip</code> &middot; pick an output format per file &middot; max 100 MB each
+      <section class="workflow-step fade-in-up delay-2" aria-labelledby="step-add-heading">
+        <div class="step">
+          <div class="num">01</div>
+          <div class="label" id="step-add-heading">Bring your exports</div>
         </div>
-      </label>
 
-      <div id="file-list" class="file-list" aria-live="polite"></div>
+        <input
+          id="file-input"
+          class="sr-only-input"
+          type="file"
+          multiple
+          accept=".txt,.zip,.apkg,.html,.htm,.md,.markdown,.csv,.tsv,text/plain,text/html,text/markdown,text/csv,application/zip,application/octet-stream"
+        />
+        <label id="drop" class="drop" for="file-input">
+          <div class="title">Click to choose <em>or drag files here</em></div>
+          <div class="hint">
+            Anki <code>.apkg</code> &middot; <code>.txt</code> &middot; <code>.zip</code> &middot; Notion <code>.html</code> / <code>.md</code> / <code>.csv</code> / <code>.zip</code> &middot; max 100 MB each
+          </div>
+        </label>
+      </section>
 
-      <button type="submit" class="primary" id="submit" disabled>
-        <span id="submit-label">Convert &amp; download</span>
-        <span class="arrow" aria-hidden="true">→</span>
-      </button>
-      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <section id="step-queue" class="workflow-step fade-in-up delay-3" aria-labelledby="step-queue-heading">
+        <div class="step">
+          <div class="num">02</div>
+          <div class="label" id="step-queue-heading">Shape each row</div>
+        </div>
+        <p class="workflow-step-hint workflow-step-hint--queue" id="step-queue-desc">Per-file output — PDF, slides, PNG, or a deck. Add files above to populate the queue.</p>
+        <div id="file-list" class="file-list" aria-live="polite" aria-describedby="step-queue-desc"></div>
+      </section>
 
-      <div id="post-actions" class="post-actions" hidden>
-        <button type="button" id="clear-all">Clear all</button>
-      </div>
+      <section class="workflow-step fade-in-up delay-4" aria-labelledby="step-run-heading">
+        <div class="step">
+          <div class="num">03</div>
+          <div class="label" id="step-run-heading">Run the conversion</div>
+        </div>
+        <p class="workflow-step-hint">Runs in-browser; nothing stored. Big files use Blob, small ones post directly.</p>
+        <button type="submit" class="primary" id="submit" disabled>
+          <span id="submit-label">Convert &amp; download</span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </button>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
 
       </form>
 
     </section>
   </div>
 
-  <section class="reference fade-in-up delay-4" aria-label="Accepted formats and import behaviour">
-    <div class="reference-heading step">
-      <div class="num">02</div>
-      <h2 class="label">Accepted formats</h2>
-    </div>
+  <section class="info fade-in-up delay-5" aria-label="Formats and import behaviour">
+    <header class="info-head">
+      <h2 class="info-title">Formats &amp; import behaviour</h2>
+    </header>
 
     <table class="ref">
         <colgroup>
@@ -1045,9 +1135,9 @@
         </tbody>
       </table>
 
-      <div class="notes">
-        <div class="note">
-          <div class="note-label">Always dropped</div>
+      <div class="info-details">
+        <div class="info-bit">
+          <h3 class="info-bit-title">Left behind</h3>
           <ul class="drop-list">
             <li>Bold, italic, colours, custom fonts</li>
             <li>Audio &amp; video (<code>[sound:&hellip;]</code>)</li>
@@ -1058,8 +1148,8 @@
           </ul>
         </div>
 
-        <div class="note">
-          <div class="note-label">Preserved</div>
+        <div class="info-bit">
+          <h3 class="info-bit-title">Kept through</h3>
           <ul class="drop-list">
             <li>Cloze <code>{{c1::&hellip;}}</code> unwrapped to the answer text</li>
             <li>Line breaks &amp; <code>&lt;br&gt;</code> kept</li>
@@ -1068,8 +1158,8 @@
           </ul>
         </div>
 
-        <div class="note">
-          <div class="note-label">Why some inputs aren't supported</div>
+        <div class="info-bit">
+          <h3 class="info-bit-title">Why some types don&rsquo;t work</h3>
           <ul class="drop-list">
             <li><code>.colpkg</code> is a full Anki profile backup (often multi&#8209;GB). Export <em>current deck</em> as <code>.apkg</code> instead.</li>
             <li>Notion PDF flattens toggles &mdash; use HTML, Markdown, or CSV.</li>
@@ -1110,12 +1200,11 @@
   const fileInput = document.getElementById("file-input");
   const drop = document.getElementById("drop");
   const fileList = document.getElementById("file-list");
+  const stepQueueDesc = document.getElementById("step-queue-desc");
   const submit = document.getElementById("submit");
   const submitLabel = document.getElementById("submit-label");
   const status = document.getElementById("status");
   const form = document.getElementById("form");
-  const postActions = document.getElementById("post-actions");
-  const clearAllBtn = document.getElementById("clear-all");
 
   const entries = [];
   let nextId = 1;
@@ -1443,22 +1532,70 @@
     submitLabel.textContent = text;
   }
 
+  function updateQueueStepHint() {
+    if (!stepQueueDesc) return;
+    if (entries.length > 0) {
+      stepQueueDesc.setAttribute("hidden", "");
+    } else {
+      stepQueueDesc.removeAttribute("hidden");
+    }
+    // #region agent log
+    fetch("http://127.0.0.1:7274/ingest/fc92f3fd-9947-4960-9ef6-c91e48fc74e9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f25422" },
+      body: JSON.stringify({
+        sessionId: "f25422",
+        location: "index.html:updateQueueStepHint",
+        message: "queue hint visibility",
+        data: {
+          hypothesisId: "H2",
+          entriesLen: entries.length,
+          hintHasHidden: stepQueueDesc.hasAttribute("hidden"),
+          cssSupportsHas:
+            typeof CSS !== "undefined" && CSS.supports && CSS.supports("selector(:has(*))"),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(function () {});
+    // #endregion
+  }
+
   function renderList() {
     fileList.innerHTML = "";
     if (entries.length === 0) {
-      fileList.classList.remove("visible");
+      const empty = document.createElement("div");
+      empty.className = "file-queue-empty";
+      empty.innerHTML =
+        "<strong>Empty queue</strong>"
+        + "<span class=\"file-queue-empty__hint\">Add files in step 01 — "
+        + "each row here picks its own output.</span>";
+      fileList.appendChild(empty);
+      // #region agent log
+      fetch("http://127.0.0.1:7274/ingest/fc92f3fd-9947-4960-9ef6-c91e48fc74e9", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f25422" },
+        body: JSON.stringify({
+          sessionId: "f25422",
+          location: "index.html:renderList:empty",
+          message: "empty queue copy snapshot",
+          data: {
+            hypothesisId: "H5",
+            emptyTextPreview: (empty.textContent || "").slice(0, 80),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(function () {});
+      // #endregion
       submit.disabled = true;
       setSubmitLabel("Convert & download");
-      postActions.hidden = true;
+      updateQueueStepHint();
       return;
     }
-    fileList.classList.add("visible");
+    updateQueueStepHint();
     submit.disabled = converting;
     setSubmitLabel(entries.length === 1
       ? "Convert & download"
       : "Convert & download " + entries.length + " files");
-    postActions.hidden = false;
-    clearAllBtn.disabled = converting;
 
     for (const e of entries) {
       const row = document.createElement("div");
@@ -1534,23 +1671,36 @@
         fmtPick.appendChild(chip);
       }
 
-      row.appendChild(info);
-      row.appendChild(state);
+      const head = document.createElement("div");
+      head.className = "file-row__head";
+      head.appendChild(info);
+      head.appendChild(state);
+      head.appendChild(action);
+      row.appendChild(head);
       row.appendChild(fmtPick);
-      row.appendChild(action);
       fileList.appendChild(row);
     }
 
-    // "Clear all" lives below the convert button now (see #post-actions).
-    // The toolbar inside the file list keeps just the running file/size
-    // summary so the queue's footer stays informational, not interactive.
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar";
     const summary = document.createElement("span");
+    summary.className = "toolbar-summary";
     const total = entries.reduce((s, e) => s + e.file.size, 0);
     summary.textContent = entries.length + " file"
       + (entries.length === 1 ? "" : "s") + " · " + formatBytes(total);
+    const clearWrap = document.createElement("span");
+    clearWrap.className = "toolbar-clear";
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.id = "clear-all";
+    clearBtn.className = "toolbar-clear-btn";
+    clearBtn.textContent = "Clear all";
+    clearBtn.setAttribute("aria-label", "Clear all files from the queue");
+    clearBtn.disabled = converting;
+    clearBtn.addEventListener("click", clearAll);
+    clearWrap.appendChild(clearBtn);
     toolbar.appendChild(summary);
+    toolbar.appendChild(clearWrap);
     fileList.appendChild(toolbar);
   }
 
@@ -1558,8 +1708,6 @@
     addFiles(e.target.files);
     fileInput.value = "";
   });
-
-  clearAllBtn.addEventListener("click", clearAll);
 
   ["dragenter", "dragover"].forEach((ev) => {
     drop.addEventListener(ev, (e) => {
@@ -1619,6 +1767,19 @@
       }),
     });
     if (!res.ok) {
+      // #region agent log
+      fetch("http://127.0.0.1:7274/ingest/fc92f3fd-9947-4960-9ef6-c91e48fc74e9", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f25422" },
+        body: JSON.stringify({
+          sessionId: "f25422",
+          location: "index.html:fetchBlobClientToken",
+          message: "blob token HTTP error",
+          data: { hypothesisId: "H1", status: res.status, pathname: pathname },
+          timestamp: Date.now(),
+        }),
+      }).catch(function () {});
+      // #endregion
       // /api/blob-upload's diagnostic branch includes a specific error
       // message — propagate it so users see the actionable reason
       // (missing env var, invalid body, etc.).
@@ -1919,6 +2080,25 @@
     }
 
     const useBlob = file.size > RAW_BODY_THRESHOLD;
+    // #region agent log
+    fetch("http://127.0.0.1:7274/ingest/fc92f3fd-9947-4960-9ef6-c91e48fc74e9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f25422" },
+      body: JSON.stringify({
+        sessionId: "f25422",
+        location: "index.html:convertOne",
+        message: "convert route chosen",
+        data: {
+          hypothesisId: "H1",
+          useBlob: useBlob,
+          fileSize: file.size,
+          rawThreshold: RAW_BODY_THRESHOLD,
+          filenameLen: (file.name || "").length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(function () {});
+    // #endregion
     const res = useBlob
       ? await postConvertBlob(entry, fmt)
       : await postConvertRaw(entry, fmt);
@@ -2014,6 +2194,23 @@
         entry.message = summary;
         done += 1;
       } catch (err) {
+        // #region agent log
+        fetch("http://127.0.0.1:7274/ingest/fc92f3fd-9947-4960-9ef6-c91e48fc74e9", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f25422" },
+          body: JSON.stringify({
+            sessionId: "f25422",
+            location: "index.html:submit:catch",
+            message: "convert batch error",
+            data: {
+              hypothesisId: "H4",
+              cancelled: !!(err && err.cancelled),
+              errMsg: err && err.message ? String(err.message).slice(0, 200) : String(err).slice(0, 200),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(function () {});
+        // #endregion
         if (err && err.cancelled) {
           // Entry has already been spliced by cancelEntry(); nothing to
           // mark. Just tick the cancelled counter so the summary line
